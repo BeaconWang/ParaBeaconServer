@@ -19,23 +19,24 @@ func NewAuthHandler(auth *service.AuthService) *AuthHandler {
 
 type registerRequest struct {
 	Username string `json:"username" binding:"required,min=3,max=32"`
-	Email    string `json:"email" binding:"required,email,max=254"`
+	Email    string `json:"email" binding:"omitempty,email,max=254"`
 	Password string `json:"password" binding:"required,min=12,max=72"`
 }
 
 type loginRequest struct {
-	Email    string `json:"email" binding:"required,email,max=254"`
-	Password string `json:"password" binding:"required,min=1,max=72"`
+	Identifier string `json:"identifier" binding:"omitempty,max=254"`
+	Email      string `json:"email" binding:"omitempty,email,max=254"`
+	Password   string `json:"password" binding:"required,min=1,max=72"`
 }
 
 type publicUser struct {
 	ID        string    `json:"id"`
 	Username  string    `json:"username"`
-	Email     string    `json:"email"`
+	Email     *string   `json:"email,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func toPublicUser(userID, username, email string, createdAt time.Time) publicUser {
+func toPublicUser(userID, username string, email *string, createdAt time.Time) publicUser {
 	return publicUser{ID: userID, Username: username, Email: email, CreatedAt: createdAt}
 }
 
@@ -67,7 +68,18 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	result, err := h.auth.Login(c.Request.Context(), req.Email, req.Password)
+	identifier := req.Identifier
+	if identifier == "" {
+		identifier = req.Email
+	} else if req.Email != "" {
+		respondError(c, http.StatusBadRequest, "provide either identifier or email")
+		return
+	}
+	if identifier == "" {
+		respondError(c, http.StatusBadRequest, "login identifier is required")
+		return
+	}
+	result, err := h.auth.Login(c.Request.Context(), identifier, req.Password)
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			respondError(c, http.StatusUnauthorized, "invalid email or password")

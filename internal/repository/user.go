@@ -11,7 +11,7 @@ import (
 
 type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
-	FindByEmail(ctx context.Context, email string) (*model.User, error)
+	FindByLogin(ctx context.Context, identifier string) (*model.User, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
 }
 
@@ -30,10 +30,10 @@ func (r *GormUserRepository) Create(ctx context.Context, user *model.User) error
 	return nil
 }
 
-func (r *GormUserRepository) FindByEmail(ctx context.Context, email string) (*model.User, error) {
+func (r *GormUserRepository) FindByLogin(ctx context.Context, identifier string) (*model.User, error) {
 	var user model.User
-	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
-		return nil, fmt.Errorf("find user by email: %w", err)
+	if err := r.db.WithContext(ctx).Where("email = ? OR username = ?", identifier, identifier).First(&user).Error; err != nil {
+		return nil, fmt.Errorf("find user by login identifier: %w", err)
 	}
 	return &user, nil
 }

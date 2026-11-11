@@ -23,22 +23,35 @@ func newMemoryUsers() *memoryUsers {
 }
 
 func (r *memoryUsers) Create(_ context.Context, user *model.User) error {
-	if _, exists := r.byEmail[user.Email]; exists {
-		return gorm.ErrDuplicatedKey
+	if user.Email != nil {
+		if _, exists := r.byEmail[*user.Email]; exists {
+			return gorm.ErrDuplicatedKey
+		}
+	}
+	for _, existing := range r.byID {
+		if existing.Username == user.Username {
+			return gorm.ErrDuplicatedKey
+		}
 	}
 	user.ID = uuid.New()
 	user.CreatedAt = time.Now().UTC()
-	r.byEmail[user.Email] = user
+	if user.Email != nil {
+		r.byEmail[*user.Email] = user
+	}
 	r.byID[user.ID] = user
 	return nil
 }
 
-func (r *memoryUsers) FindByEmail(_ context.Context, email string) (*model.User, error) {
-	user, ok := r.byEmail[email]
-	if !ok {
-		return nil, gorm.ErrRecordNotFound
+func (r *memoryUsers) FindByLogin(_ context.Context, identifier string) (*model.User, error) {
+	if user, ok := r.byEmail[identifier]; ok {
+		return user, nil
 	}
-	return user, nil
+	for _, user := range r.byID {
+		if user.Username == identifier {
+			return user, nil
+		}
+	}
+	return nil, gorm.ErrRecordNotFound
 }
 
 func (r *memoryUsers) FindByID(_ context.Context, id uuid.UUID) (*model.User, error) {
@@ -59,7 +72,7 @@ func TestAuthServiceRegisterLoginAndProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	if user.Username != "sky_rider" || user.Email != "pilot@example.com" {
+	if user.Username != "sky_rider" || user.Email == nil || *user.Email != "pilot@example.com" {
 		t.Fatalf("registration did not normalize identifiers: %#v", user)
 	}
 	if strings.Contains(user.PasswordHash, "a-long-unique-passphrase") {
@@ -67,6 +80,20 @@ func TestAuthServiceRegisterLoginAndProfile(t *testing.T) {
 	}
 	if _, err := svc.Register(ctx, "sky_rider", "pilot@example.com", "a-long-unique-passphrase"); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate Register() error = %v, want ErrConflict", err)
+	}
+
+	usernameOnly, err := svc.Register(ctx, "new_pilot", "", "another-long-passphrase")
+	if err != nil {
+		t.Fatalf("Register() without optional email error = %v", err)
+	}
+	if usernameOnly.Email != nil {
+		t.Fatalf("email without a supplied value = %v, want nil", usernameOnly.Email)
+	}
+	if _, err := svc.Register(ctx, "another_pilot", "not-an-email", "another-long-passphrase"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("Register() with invalid optional email error = %v, want ErrInvalidInput", err)
+	}
+	if _, err := svc.Login(ctx, "NEW_PILOT", "another-long-passphrase"); err != nil {
+		t.Fatalf("Login() without email error = %v", err)
 	}
 
 	result, err := svc.Login(ctx, "PILOT@example.com", "a-long-unique-passphrase")
@@ -79,6 +106,14 @@ func TestAuthServiceRegisterLoginAndProfile(t *testing.T) {
 	}
 	if claims.Subject != user.ID.String() {
 		t.Fatalf("token subject = %q, want %q", claims.Subject, user.ID)
+	}
+	usernameResult, err := svc.Login(ctx, "SKY_RIDER", "a-long-unique-passphrase")
+	if err != nil {
+		t.Fatalf("Login() with username error = %v", err)
+	}
+	usernameClaims, err := tokens.Parse(usernameResult.Token)
+	if err != nil || usernameClaims.Subject != user.ID.String() {
+		t.Fatalf("username login token claims = %#v, error = %v", usernameClaims, err)
 	}
 	if _, err := svc.Login(ctx, "pilot@example.com", "incorrect-password"); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("invalid password Login() error = %v, want ErrInvalidCredentials", err)

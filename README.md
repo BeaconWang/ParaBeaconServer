@@ -34,23 +34,27 @@ Go 1.22+ API starter for paragliding, hang gliding, and general aviation sports.
 
 The API listens on `http://localhost:8080`. Redis is optional when `REDIS_URL` is empty; when configured, it must be reachable at startup. The development Compose file enables PostGIS on first database initialization.
 
+## Authentication and database design
+
+The client connects over HTTP/JSON. Requests pass through the Gin router and rate limiter, then the auth handler/service/repository layers. PostgreSQL stores accounts in `users`: UUID primary key, normalized unique `username`, optional unique `email` (SQL `NULL` when omitted), bcrypt `password_hash`, and creation/update timestamps. Only username and password are required at registration; email is optional. Passwords are never stored or returned in plaintext. JWT access tokens are stateless and short-lived; protected API calls send them as `Authorization: Bearer <token>`. The existing `User` model is migrated at startup to allow accounts without email.
+
 ## API
 
 ### Register
 
 ```powershell
-curl.exe -i -X POST http://localhost:8080/api/v1/auth/register -H 'Content-Type: application/json' --data-raw '{"username":"sky_rider","email":"pilot@example.com","password":"A-long-unique-passphrase-2026"}'
+curl.exe -i -X POST http://localhost:8080/api/v1/auth/register -H 'Content-Type: application/json' --data-raw '{"username":"sky_rider","password":"A-long-unique-passphrase-2026"}'
 ```
 
-Usernames are normalized to lowercase and must be 3–32 ASCII letters, digits, or underscores. Emails are normalized to lowercase and unique. Passwords must be 12–72 bytes; bcrypt hashes are stored and never returned by the API. Duplicate username/email returns `409`.
+Only `username` and `password` are required; `email` may be omitted. Usernames are normalized to lowercase and must be 3–32 ASCII letters, digits, or underscores. Supplied emails are normalized to lowercase and unique. Passwords must be 12–72 bytes; bcrypt hashes are stored and never returned by the API. Duplicate username or email returns `409`.
 
 ### Login
 
 ```powershell
-curl.exe -i -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' --data-raw '{"email":"pilot@example.com","password":"A-long-unique-passphrase-2026"}'
+curl.exe -i -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' --data-raw '{"identifier":"sky_rider","password":"A-long-unique-passphrase-2026"}'
 ```
 
-The response contains an `access_token` (HS256 JWT), `token_type`, `expires_at`, and public user fields. Invalid credentials return a generic `401` response. Configure token lifetime with `JWT_EXPIRY` (default `15m`).
+`identifier` accepts the registered username or email address. For older clients, `email` remains accepted instead. The response contains an `access_token` (HS256 JWT), `token_type`, `expires_at`, and public user fields. Invalid credentials return a generic `401` response. Configure token lifetime with `JWT_EXPIRY` (default `15m`).
 
 ### Authenticated profile
 
