@@ -46,7 +46,7 @@ The client connects over HTTP/JSON. Requests pass through the Gin router and rat
 curl.exe -i -X POST http://localhost:8080/api/v1/auth/register -H 'Content-Type: application/json' --data-raw '{"username":"sky_rider","password":"A-long-unique-passphrase-2026"}'
 ```
 
-Only `username` and `password` are required; `email` may be omitted. Usernames are normalized to lowercase and must be 3–32 ASCII letters, digits, or underscores. Supplied emails are normalized to lowercase and unique. Passwords must be 12–72 bytes; bcrypt hashes are stored and never returned by the API. Duplicate username or email returns `409`.
+Only `username` and `password` are required; `email` may be omitted. Usernames are normalized to lowercase and must be 3–32 ASCII letters, digits, or underscores. Supplied emails are normalized to lowercase and unique. Passwords must contain at least 6 characters and no more than 72 UTF-8 bytes; bcrypt hashes are stored and never returned by the API. Duplicate username or email returns `409`.
 
 ### Login
 

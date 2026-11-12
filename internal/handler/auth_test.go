@@ -118,7 +118,7 @@ func TestRegisterRequiresOnlyUsernameAndPassword(t *testing.T) {
 	tokens := utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute)
 	engine := gin.New()
 	engine.POST("/register", NewAuthHandler(service.NewAuthService(users, tokens)).Register)
-	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"sky_rider","password":"a-long-unique-passphrase"}`))
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"sky_rider","password":"abc123"}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
 	engine.ServeHTTP(res, req)

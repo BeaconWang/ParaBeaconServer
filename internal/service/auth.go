@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/model"
@@ -24,7 +25,7 @@ var (
 	usernamePattern       = regexp.MustCompile(`^[a-zA-Z0-9_]{3,32}$`)
 )
 
-const MinPasswordBytes = 12
+const MinPasswordCharacters = 6
 
 type AuthService struct {
 	users  repository.UserRepository
@@ -53,8 +54,8 @@ func (s *AuthService) Register(ctx context.Context, username, email, password st
 			return nil, fmt.Errorf("%w: invalid email address", ErrInvalidInput)
 		}
 	}
-	if len(password) < MinPasswordBytes || len(password) > utils.MaxPasswordBytes {
-		return nil, fmt.Errorf("%w: password length must be between %d and %d bytes", ErrInvalidInput, MinPasswordBytes, utils.MaxPasswordBytes)
+	if utf8.RuneCountInString(password) < MinPasswordCharacters || len(password) > utils.MaxPasswordBytes {
+		return nil, fmt.Errorf("%w: password must contain at least %d characters and no more than %d bytes", ErrInvalidInput, MinPasswordCharacters, utils.MaxPasswordBytes)
 	}
 
 	hash, err := utils.HashPassword(password)

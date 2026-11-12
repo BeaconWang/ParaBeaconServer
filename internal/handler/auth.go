@@ -20,7 +20,7 @@ func NewAuthHandler(auth *service.AuthService) *AuthHandler {
 type registerRequest struct {
 	Username string `json:"username" binding:"required,min=3,max=32"`
 	Email    string `json:"email" binding:"omitempty,email,max=254"`
-	Password string `json:"password" binding:"required,min=12,max=72"`
+	Password string `json:"password" binding:"required,min=6,max=72"`
 }
 
 type loginRequest struct {

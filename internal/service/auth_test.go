@@ -82,17 +82,20 @@ func TestAuthServiceRegisterLoginAndProfile(t *testing.T) {
 		t.Fatalf("duplicate Register() error = %v, want ErrConflict", err)
 	}
 
-	usernameOnly, err := svc.Register(ctx, "new_pilot", "", "another-long-passphrase")
+	usernameOnly, err := svc.Register(ctx, "new_pilot", "", "abc123")
 	if err != nil {
 		t.Fatalf("Register() without optional email error = %v", err)
 	}
 	if usernameOnly.Email != nil {
 		t.Fatalf("email without a supplied value = %v, want nil", usernameOnly.Email)
 	}
+	if _, err := svc.Register(ctx, "short_pilot", "", "abc12"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("Register() with a five-character password error = %v, want ErrInvalidInput", err)
+	}
 	if _, err := svc.Register(ctx, "another_pilot", "not-an-email", "another-long-passphrase"); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("Register() with invalid optional email error = %v, want ErrInvalidInput", err)
 	}
-	if _, err := svc.Login(ctx, "NEW_PILOT", "another-long-passphrase"); err != nil {
+	if _, err := svc.Login(ctx, "NEW_PILOT", "abc123"); err != nil {
 		t.Fatalf("Login() without email error = %v", err)
 	}
 
