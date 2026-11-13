@@ -9,6 +9,7 @@ import (
 	"github.com/parabeacon/server/internal/config"
 	"github.com/parabeacon/server/internal/handler"
 	"github.com/parabeacon/server/internal/middleware"
+	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/internal/service"
 	"github.com/parabeacon/server/pkg/utils"
 	"gorm.io/gorm"
@@ -43,16 +44,24 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(authService)
+	trackingRepo := repository.NewTrackingRepository(db)
+	trackingService := service.NewTrackingService(trackingRepo)
+	trackingHandler := handler.NewTrackingHandler(trackingService)
 	v1 := engine.Group("/api/v1")
 	{
 		auth := v1.Group("/auth")
 		auth.POST("/register", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), authHandler.Register)
 		auth.POST("/login", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), authHandler.Login)
+		auth.POST("/refresh", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), authHandler.Refresh)
+		auth.POST("/logout", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), authHandler.Logout)
 
 		protected := v1.Group("")
 		protected.Use(middleware.RequireAuth(tokens))
 		protected.GET("/user/profile", userHandler.Profile)
-		protected.GET("/tracking", handler.NotImplemented("live_tracking"))
+		protected.GET("/tracking", trackingHandler.ListActive)
+		protected.POST("/tracking/sessions", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), trackingHandler.Start)
+		protected.POST("/tracking/sessions/:session_id/points", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), trackingHandler.AddPoints)
+		protected.POST("/tracking/sessions/:session_id/stop", trackingHandler.Stop)
 		protected.GET("/flight-logs", handler.NotImplemented("flight_logs_igc"))
 		protected.GET("/chat", handler.NotImplemented("chat_im"))
 	}

@@ -57,7 +57,8 @@ func run() error {
 
 	tokens := utils.NewTokenManager(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTExpiry)
 	users := repository.NewUserRepository(db)
-	authService := service.NewAuthService(users, tokens)
+	refreshTokens := repository.NewRefreshTokenRepository(db)
+	authService := service.NewAuthService(users, tokens, refreshTokens)
 	engine, err := router.New(cfg, db, authService, tokens)
 	if err != nil {
 		return fmt.Errorf("configure HTTP routes: %w", err)

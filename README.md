@@ -54,7 +54,9 @@ Only `username` and `password` are required; `email` may be omitted. Usernames a
 curl.exe -i -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' --data-raw '{"identifier":"sky_rider","password":"A-long-unique-passphrase-2026"}'
 ```
 
-`identifier` accepts the registered username or email address. For older clients, `email` remains accepted instead. The response contains an `access_token` (HS256 JWT), `token_type`, `expires_at`, and public user fields. Invalid credentials return a generic `401` response. Configure token lifetime with `JWT_EXPIRY` (default `15m`).
+`identifier` accepts the registered username or email address. For older clients, `email` remains accepted instead. The response contains an `access_token` (HS256 JWT), a one-time rotating `refresh_token`, their expiry timestamps, and public user fields. Invalid credentials return a generic `401` response. Configure access-token lifetime with `JWT_EXPIRY` (default `15m`); refresh tokens expire after 30 days and only their SHA-256 hashes are stored server-side.
+
+When the access token is close to expiry, exchange the refresh token at `POST /api/v1/auth/refresh` with `{"refresh_token":"…"}`. The response returns a new access token and a rotated refresh token; the previous refresh token is immediately invalidated. Store both tokens securely and never log or expose the refresh token.
 
 ### Authenticated profile
 
@@ -69,9 +71,22 @@ curl.exe -i http://localhost:8080/api/v1/user/profile -H 'Authorization: Bearer 
 - `GET /healthz`: process liveness.
 - `GET /readyz`: PostgreSQL readiness.
 
-### Reserved modules
+### Live flight tracking
 
-Authenticated `GET /api/v1/tracking`, `/api/v1/flight-logs`, and `/api/v1/chat` return `501 Not Implemented`. They are route placeholders for later WebSocket/MQTT tracking, IGC storage, and IM work; no transport or domain logic is implied yet. Redis client initialization is already available for those modules.
+The authenticated tracking API accepts live flight telemetry over HTTPS JSON. The server derives the owner from the Bearer token; clients cannot write to another user's session. Sessions and points are stored in `live_track_sessions` and `live_track_points`. Point uploads are idempotent per session and timestamp, and each batch is limited to 100 points.
+
+Create a session when a flight becomes active:
+
+```json
+POST /api/v1/tracking/sessions
+{"pilot_name":"sky_rider","start_time":"2026-11-13T10:00:00Z"}
+```
+
+The `201` response contains a server-generated `session_id`. Upload batches to `POST /api/v1/tracking/sessions/{session_id}/points` with `{"session_id":"…","trackpoints":[...]}`. Each point requires `lat`, `lon`, `altitude` (meters), `speed` (m/s), and an RFC 3339 `timestamp`; optional fields include vertical speed (m/s), GPS/barometric altitude (meters), heading/bearing (degrees), wind (m/s and degrees), GPS accuracy, satellites, pressure (hPa), and temperature (°C). The response reports the number of newly accepted points; duplicate timestamps are safely ignored.
+
+Stop the session with `POST /api/v1/tracking/sessions/{session_id}/stop` and `{"end_time":"…"}`. Authenticated `GET /api/v1/tracking` lists only the caller's active sessions. Session creation is limited to 10 requests/minute and point batches to 60 requests/minute per client IP.
+
+Authenticated `GET /api/v1/flight-logs` and `/api/v1/chat` remain reserved and return `501 Not Implemented`; Redis client initialization is available for future modules.
 
 ## Tests and build
 

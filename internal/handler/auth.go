@@ -29,6 +29,14 @@ type loginRequest struct {
 	Password   string `json:"password" binding:"required,min=1,max=72"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required,min=32,max=128"`
+}
+
+type logoutRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"omitempty,min=32,max=128"`
+}
+
 type publicUser struct {
 	ID        string    `json:"id"`
 	Username  string    `json:"username"`
@@ -88,11 +96,54 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"access_token": result.Token,
 		"token_type":   "Bearer",
 		"expires_at":   result.ExpiresAt,
 		"expires_in":   int(time.Until(result.ExpiresAt).Seconds()),
 		"user":         toPublicUser(result.User.ID.String(), result.User.Username, result.User.Email, result.User.CreatedAt),
+	}
+	if result.RefreshToken != "" {
+		response["refresh_token"] = result.RefreshToken
+		response["refresh_expires_at"] = result.RefreshExpiresAt
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *AuthHandler) Refresh(c *gin.Context) {
+	var req refreshRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	result, err := h.auth.Refresh(c.Request.Context(), req.RefreshToken)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidRefresh) {
+			respondError(c, http.StatusUnauthorized, "invalid refresh token")
+			return
+		}
+		respondInternalError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"access_token":       result.Token,
+		"token_type":         "Bearer",
+		"expires_at":         result.ExpiresAt,
+		"expires_in":         int(time.Until(result.ExpiresAt).Seconds()),
+		"refresh_token":      result.RefreshToken,
+		"refresh_expires_at": result.RefreshExpiresAt,
 	})
+}
+
+func (h *AuthHandler) Logout(c *gin.Context) {
+	var req logoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.auth.Logout(c.Request.Context(), req.RefreshToken); err != nil {
+		respondInternalError(c)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

@@ -34,7 +34,7 @@ func Open(ctx context.Context, dsn string) (*gorm.DB, error) {
 	if err := sqlDB.PingContext(pingCtx); err != nil {
 		return nil, fmt.Errorf("ping PostgreSQL: %w", err)
 	}
-	if err := db.WithContext(ctx).AutoMigrate(&model.User{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.LiveTrackSession{}, &model.LiveTrackPoint{}); err != nil {
 		return nil, fmt.Errorf("migrate database schema: %w", err)
 	}
 	return db, nil

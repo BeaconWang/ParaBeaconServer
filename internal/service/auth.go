@@ -2,6 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/mail"
@@ -22,24 +26,35 @@ var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrInvalidInput       = errors.New("invalid registration input")
 	ErrNotFound           = errors.New("user not found")
+	ErrInvalidRefresh     = repository.ErrInvalidRefreshToken
 	usernamePattern       = regexp.MustCompile(`^[a-zA-Z0-9_]{3,32}$`)
 )
 
-const MinPasswordCharacters = 6
+const (
+	MinPasswordCharacters = 6
+	RefreshTokenLifetime  = 30 * 24 * time.Hour
+)
 
 type AuthService struct {
-	users  repository.UserRepository
-	tokens *utils.TokenManager
+	users         repository.UserRepository
+	tokens        *utils.TokenManager
+	refreshTokens repository.RefreshTokenRepository
 }
 
 type AuthResult struct {
-	User      *model.User
-	Token     string
-	ExpiresAt time.Time
+	User             *model.User
+	Token            string
+	ExpiresAt        time.Time
+	RefreshToken     string
+	RefreshExpiresAt time.Time
 }
 
-func NewAuthService(users repository.UserRepository, tokens *utils.TokenManager) *AuthService {
-	return &AuthService{users: users, tokens: tokens}
+func NewAuthService(users repository.UserRepository, tokens *utils.TokenManager, refreshTokens ...repository.RefreshTokenRepository) *AuthService {
+	service := &AuthService{users: users, tokens: tokens}
+	if len(refreshTokens) > 0 {
+		service.refreshTokens = refreshTokens[0]
+	}
+	return service
 }
 
 func (s *AuthService) Register(ctx context.Context, username, email, password string) (*model.User, error) {
@@ -91,7 +106,78 @@ func (s *AuthService) Login(ctx context.Context, identifier, password string) (*
 	if err != nil {
 		return nil, err
 	}
-	return &AuthResult{User: user, Token: token, ExpiresAt: expiresAt}, nil
+	result := &AuthResult{User: user, Token: token, ExpiresAt: expiresAt}
+	if s.refreshTokens != nil {
+		refreshToken, tokenHash, err := createRefreshToken()
+		if err != nil {
+			return nil, err
+		}
+		refreshExpiresAt := time.Now().UTC().Add(RefreshTokenLifetime)
+		if err := s.refreshTokens.Create(ctx, &model.RefreshToken{
+			ID:        uuid.New(),
+			UserID:    user.ID,
+			TokenHash: tokenHash,
+			ExpiresAt: refreshExpiresAt,
+		}); err != nil {
+			return nil, err
+		}
+		result.RefreshToken = refreshToken
+		result.RefreshExpiresAt = refreshExpiresAt
+	}
+	return result, nil
+}
+
+func (s *AuthService) Refresh(ctx context.Context, rawToken string) (*AuthResult, error) {
+	if s.refreshTokens == nil || len(rawToken) < 32 || len(rawToken) > 128 {
+		return nil, ErrInvalidRefresh
+	}
+	newToken, newHash, err := createRefreshToken()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	replacement := &model.RefreshToken{
+		TokenHash: newHash,
+		ExpiresAt: now.Add(RefreshTokenLifetime),
+	}
+	userID, err := s.refreshTokens.Rotate(ctx, hashRefreshToken(rawToken), now, replacement)
+	if err != nil {
+		if errors.Is(err, repository.ErrInvalidRefreshToken) {
+			return nil, ErrInvalidRefresh
+		}
+		return nil, err
+	}
+	accessToken, expiresAt, err := s.tokens.Issue(userID)
+	if err != nil {
+		return nil, err
+	}
+	return &AuthResult{
+		Token:            accessToken,
+		ExpiresAt:        expiresAt,
+		RefreshToken:     newToken,
+		RefreshExpiresAt: replacement.ExpiresAt,
+	}, nil
+}
+
+func createRefreshToken() (string, string, error) {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		return "", "", fmt.Errorf("generate refresh token: %w", err)
+	}
+	raw := base64.RawURLEncoding.EncodeToString(value)
+	return raw, hashRefreshToken(raw), nil
+}
+
+func hashRefreshToken(raw string) string {
+	digest := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(digest[:])
+}
+
+func (s *AuthService) Logout(ctx context.Context, rawRefreshToken string) error {
+	if s.refreshTokens == nil || len(rawRefreshToken) < 32 || len(rawRefreshToken) > 128 {
+		return nil
+	}
+	return s.refreshTokens.Revoke(ctx, hashRefreshToken(rawRefreshToken), time.Now().UTC())
 }
 
 func (s *AuthService) Profile(ctx context.Context, userID uuid.UUID) (*model.User, error) {
