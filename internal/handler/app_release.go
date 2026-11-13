@@ -60,7 +60,8 @@ func (h *AppReleaseHandler) List(c *gin.Context) {
 			DownloadURL: fmt.Sprintf("/api/v1/app/releases/%d/download", release.VersionCode),
 		})
 	}
-	c.Header("Cache-Control", "public, max-age=60")
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+	c.Header("Pragma", "no-cache")
 	c.JSON(http.StatusOK, gin.H{"releases": response})
 }
 

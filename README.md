@@ -92,7 +92,7 @@ Authenticated `GET /api/v1/flight-logs` and `/api/v1/chat` remain reserved and r
 
 ## Android APK releases
 
-APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./data/apks`) and indexed in the `app_releases` table by Android `versionCode`. Mount that directory on persistent storage in production. Set `APK_PACKAGE_NAME` to the Android application ID. Public clients can query `GET /api/v1/app/releases/latest` for the newest build or `GET /api/v1/app/releases` for every published version. Every published version is publicly downloadable through its `download_url` at `GET /api/v1/app/releases/{version_code}/download`; downloads are served as APK attachments and include a SHA-256 digest and byte size for client verification.
+APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./data/apks`) and indexed in the `app_releases` table by Android `versionCode`. Mount that directory on persistent storage in production. Set `APK_PACKAGE_NAME` to the Android application ID. Public clients can query `GET /api/v1/app/releases/latest` for the newest build or `GET /api/v1/app/releases` for every published version. Every published version is publicly downloadable through its `download_url` at `GET /api/v1/app/releases/{version_code}/download`; downloads are served as APK attachments and include a SHA-256 digest and byte size for client verification. The release-history endpoint is explicitly non-cacheable so clients request current server data.
 
 Publishing is disabled unless `APK_RELEASE_ADMIN_TOKEN` contains a secret of at least 32 characters. Keep it in a secret manager; never include it in the app. Upload a signed APK directly as the request body:
 
@@ -109,7 +109,7 @@ The server limits uploads to 512 MiB, verifies the APK archive contains `Android
 
 ### Release management web UI
 
-Open `/release` to use the embedded release management console. Enter the `APK_RELEASE_ADMIN_TOKEN` when publishing or deleting releases; the page keeps it in memory and does not write it to browser storage. The console supports signed APK upload, public release history, SHA-256 inspection, downloads, and multi-select deletion. APK contents are immutable after publishing, while an administrator may remove a release. Deleting a release removes its public metadata and APK file; the admin-only endpoint is `DELETE /api/v1/admin/app/releases/{version_code}`.
+Open `/release` to use the embedded release management console. Enter the `APK_RELEASE_ADMIN_TOKEN` when publishing or deleting releases; the page keeps it in memory and does not write it to browser storage. The console supports signed APK upload, public release history, SHA-256 inspection, downloads, multi-select deletion, and English/Chinese language switching. APK contents are immutable after publishing, while an administrator may remove a release. Deleting a release removes its public metadata and APK file; the admin-only endpoint is `DELETE /api/v1/admin/app/releases/{version_code}`.
 
 ## Tests and build
 

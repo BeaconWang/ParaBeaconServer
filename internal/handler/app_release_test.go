@@ -92,6 +92,12 @@ func TestListAppReleasesReturnsProtectedHistoryMetadata(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
+	if got := response.Header().Get("Cache-Control"); got != "no-store, no-cache, must-revalidate" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := response.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q", got)
+	}
 	for _, value := range []string{`"releases"`, `"version_name":"1.2.3"`, `"published_at":"2026-11-13T10:00:00Z"`} {
 		if !strings.Contains(response.Body.String(), value) {
 			t.Errorf("response missing %s: %s", value, response.Body.String())

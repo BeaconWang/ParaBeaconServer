@@ -11,6 +11,7 @@
     body { margin:0; min-height:100vh; color:var(--text); background:radial-gradient(circle at 10% 0%, #1a315a 0, transparent 34rem), var(--bg); font:15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     main { width:min(1120px, calc(100% - 36px)); margin:0 auto; padding:48px 0 64px; }
     header { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:34px; }
+    .header-actions { display:flex; align-items:center; gap:10px; }
     .eyebrow { color:var(--accent); font-size:12px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
     h1 { margin:8px 0 0; font-size:clamp(32px, 5vw, 56px); line-height:1; letter-spacing:-.05em; }
     h2 { margin:0; font-size:20px; letter-spacing:-.02em; }
@@ -62,54 +63,68 @@
     <header>
       <div>
         <div class="eyebrow">ParaBeacon / Distribution</div>
-        <h1>Release control room</h1>
-        <p class="subtitle">Publish signed Android packages, inspect release history, and keep the latest build ready for pilots.</p>
+        <h1 data-i18n="releaseControlRoom">Release control room</h1>
+        <p class="subtitle" data-i18n="subtitle">Publish signed Android packages, inspect release history, and keep the latest build ready for pilots.</p>
       </div>
-      <div class="badge">Protected publisher</div>
+      <div class="header-actions"><button id="language-toggle" class="secondary" type="button" aria-label="Switch language">中文</button><div class="badge" data-i18n="protectedPublisher">Protected publisher</div></div>
     </header>
 
     <section class="grid">
       <article class="panel latest">
-        <div class="panel-header"><h2>Latest release</h2><button id="refresh" class="secondary" type="button">Refresh</button></div>
-        <div id="latest"><div class="empty">Loading release metadata…</div></div>
+        <div class="panel-header"><h2 data-i18n="latestRelease">Latest release</h2><button id="refresh" class="secondary" type="button" data-i18n="refresh">Refresh</button></div>
+        <div id="latest"><div class="empty" data-i18n="loadingMetadata">Loading release metadata…</div></div>
       </article>
 
       <article class="panel">
-        <div class="panel-header"><h2>Publish APK</h2></div>
+        <div class="panel-header"><h2 data-i18n="publishAPK">Publish APK</h2></div>
         <form id="publish-form">
-          <label>Admin token<input id="token" type="password" autocomplete="off" minlength="32" required placeholder="Enter the server release token"></label>
+          <label><span data-i18n="adminToken">Admin token</span><input id="token" type="password" autocomplete="off" minlength="32" required data-i18n-placeholder="tokenPlaceholder" placeholder="Enter the server release token"></label>
           <div class="row">
-            <label>Version name<input id="version-name" required pattern="[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}" placeholder="1.4.0"></label>
-            <label>Version code<input id="version-code" required type="number" min="1" max="2100000000" step="1" placeholder="140"></label>
+            <label><span data-i18n="versionName">Version name</span><input id="version-name" required pattern="[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}" placeholder="1.4.0"></label>
+            <label><span data-i18n="versionCode">Version code</span><input id="version-code" required type="number" min="1" max="2100000000" step="1" placeholder="140"></label>
           </div>
-          <label>Signed APK<input id="apk" required type="file" accept=".apk,application/vnd.android.package-archive"></label>
-          <button id="publish" type="submit">Publish release</button>
+          <label><span data-i18n="signedAPK">Signed APK</span><input id="apk" required type="file" accept=".apk,application/vnd.android.package-archive"></label>
+          <button id="publish" type="submit" data-i18n="publishRelease">Publish release</button>
           <div id="notice" class="notice" role="status" aria-live="polite"></div>
         </form>
       </article>
 
       <article class="panel history">
-        <div class="panel-header"><div><h2>Release history</h2><div class="release-meta">Select published builds to remove them from public downloads.</div></div><div class="history-actions"><button id="delete-selected" class="danger" type="button" disabled>Delete selected</button></div></div>
-        <div id="history"><div class="empty">Loading release history…</div></div>
+        <div class="panel-header"><div><h2 data-i18n="releaseHistory">Release history</h2><div class="release-meta" data-i18n="historyHint">Select published builds to remove them from public downloads.</div></div><div class="history-actions"><button id="delete-selected" class="danger" type="button" disabled data-i18n="deleteSelected">Delete selected</button></div></div>
+        <div id="history"><div class="empty" data-i18n="loadingHistory">Loading release history…</div></div>
       </article>
     </section>
-    <footer>Tokens stay in this page's memory only and are never written to browser storage.</footer>
+    <footer data-i18n="footer">Tokens stay in this page's memory only and are never written to browser storage.</footer>
   </main>
   <script>
     const $ = (id) => document.getElementById(id);
+    const translations = {
+      en: {
+        pageTitle: "ParaBeacon Releases", releaseControlRoom: "Release control room", subtitle: "Publish signed Android packages, inspect release history, and keep the latest build ready for pilots.", protectedPublisher: "Protected publisher", switchLanguage: "Switch language", latestRelease: "Latest release", refresh: "Refresh", loadingMetadata: "Loading release metadata…", publishAPK: "Publish APK", adminToken: "Admin token", tokenPlaceholder: "Enter the server release token", versionName: "Version name", versionCode: "Version code", signedAPK: "Signed APK", publishRelease: "Publish release", releaseHistory: "Release history", historyHint: "Select published builds to remove them from public downloads.", deleteSelected: "Delete selected", loadingHistory: "Loading release history…", footer: "Tokens stay in this page's memory only and are never written to browser storage.", noRelease: "No release has been published yet.", packageSize: "Package size", downloadAPK: "Download APK", releaseMeta: "Version code {{code}} · Published {{date}}", noReleases: "No releases found.", select: "Select", published: "Published", size: "Size", download: "Download", selectVersion: "Select version {{version}}", enterTokenDelete: "Enter the admin token before deleting releases.", confirmDelete: "Delete {{count}} release(s)? Their APK files will no longer be downloadable.", deleting: "Deleting selected releases…", deleted: "Deleted {{count}} release(s).", uploading: "Uploading and validating APK…", publishedSuccess: "Release published successfully.", requestFailed: "Request failed ({{status}})"
+      },
+      zh: {
+        pageTitle: "ParaBeacon 发布管理", releaseControlRoom: "发布控制台", subtitle: "发布已签名的 Android 安装包，查看版本历史，并为飞行员保持最新构建可用。", protectedPublisher: "受保护的发布者", switchLanguage: "切换语言", latestRelease: "最新版本", refresh: "刷新", loadingMetadata: "正在加载版本信息…", publishAPK: "发布 APK", adminToken: "管理员令牌", tokenPlaceholder: "输入服务器发布令牌", versionName: "版本名称", versionCode: "版本号", signedAPK: "已签名 APK", publishRelease: "发布版本", releaseHistory: "发布历史", historyHint: "选择已发布的构建，将其从公开下载中移除。", deleteSelected: "删除所选版本", loadingHistory: "正在加载发布历史…", footer: "令牌仅保留在当前页面内存中，不会写入浏览器存储。", noRelease: "尚未发布任何版本。", packageSize: "包大小", downloadAPK: "下载 APK", releaseMeta: "版本号 {{code}} · 发布于 {{date}}", noReleases: "未找到发布版本。", select: "选择", published: "发布时间", size: "大小", download: "下载", selectVersion: "选择版本 {{version}}", enterTokenDelete: "删除版本前请输入管理员令牌。", confirmDelete: "确定删除 {{count}} 个版本吗？删除后将无法再下载对应 APK。", deleting: "正在删除所选版本…", deleted: "已删除 {{count}} 个版本。", uploading: "正在上传并验证 APK…", publishedSuccess: "版本发布成功。", requestFailed: "请求失败（{{status}}）"
+      }
+    };
+    const storedLanguage = window.localStorage.getItem("parabeacon-language");
+    let language = storedLanguage === "zh" || storedLanguage === "en" ? storedLanguage : ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
+    const t = (key, values = {}) => Object.entries(values).reduce((text, [name, value]) => text.split(`{{${name}}}`).join(String(value)), (translations[language] || translations.en)[key] || key);
+    const applyLanguage = () => { document.documentElement.lang = language; document.title = t("pageTitle"); document.querySelectorAll("[data-i18n]").forEach((element) => { element.textContent = t(element.dataset.i18n); }); document.querySelectorAll("[data-i18n-placeholder]").forEach((element) => { element.placeholder = t(element.dataset.i18nPlaceholder); }); const toggle = $("language-toggle"); toggle.textContent = language === "en" ? "中文" : "English"; toggle.setAttribute("aria-label", t("switchLanguage")); updateDeleteButton(); };
     const formatBytes = (bytes) => { if (!bytes) return "0 B"; const units = ["B", "KB", "MB", "GB"]; const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1); return `${(bytes / Math.pow(1024, i)).toFixed(i ? 1 : 0)} ${units[i]}`; };
-    const formatDate = (value) => value ? new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "—";
+    const formatDate = (value) => value ? new Date(value).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { dateStyle: "medium", timeStyle: "short" }) : "—";
     const setNotice = (message, kind = "") => { $("notice").textContent = message; $("notice").className = `notice ${kind}`; };
-    const api = async (path, options = {}) => { const response = await fetch(path, options); let body = {}; try { body = await response.json(); } catch (_) {} if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`); return body; };
-    const renderLatest = (release) => { $("latest").innerHTML = release ? `<div><div class="eyebrow">${release.package_name}</div><div class="release-version">v${release.version_name}</div><div class="release-meta">Version code ${release.version_code} · Published ${formatDate(release.published_at)}</div></div><div class="stats"><div class="stat"><strong>${formatBytes(release.size_bytes)}</strong><span>Package size</span></div><div class="stat"><strong>${release.sha256.slice(0, 12)}…</strong><span>SHA-256</span></div><a class="button" href="${release.download_url}">Download APK</a></div>` : `<div class="empty">No release has been published yet.</div>`; };
+    const api = async (path, options = {}) => { const response = await fetch(path, options); let body = {}; try { body = await response.json(); } catch (_) {} if (!response.ok) throw new Error(body.error || t("requestFailed", { status: response.status })); return body; };
+    const renderLatest = (release) => { $("latest").innerHTML = release ? `<div><div class="eyebrow">${release.package_name}</div><div class="release-version">v${release.version_name}</div><div class="release-meta">${t("releaseMeta", { code: release.version_code, date: formatDate(release.published_at) })}</div></div><div class="stats"><div class="stat"><strong>${formatBytes(release.size_bytes)}</strong><span>${t("packageSize")}</span></div><div class="stat"><strong>${release.sha256.slice(0, 12)}…</strong><span>SHA-256</span></div><a class="button" href="${release.download_url}">${t("downloadAPK")}</a></div>` : `<div class="empty">${t("noRelease")}</div>`; };
     const selectedCodes = () => [...document.querySelectorAll(".release-select:checked")].map((input) => input.dataset.versionCode);
-    const updateDeleteButton = () => { const count = selectedCodes().length; const button = $("delete-selected"); button.disabled = count === 0; button.textContent = count ? `Delete selected (${count})` : "Delete selected"; };
-    const renderHistory = (releases) => { if (!releases.length) { $("history").innerHTML = `<div class="empty">No releases found.</div>`; updateDeleteButton(); return; } $("history").innerHTML = `<table><thead><tr><th>Select</th><th>Version</th><th>Code</th><th>Published</th><th>Size</th><th>SHA-256</th><th></th></tr></thead><tbody>${releases.map((r) => `<tr><td><input class="release-select" type="checkbox" data-version-code="${r.version_code}" aria-label="Select version ${r.version_name}"></td><td><strong>v${r.version_name}</strong></td><td>${r.version_code}</td><td>${formatDate(r.published_at)}</td><td>${formatBytes(r.size_bytes)}</td><td><code title="${r.sha256}">${r.sha256.slice(0, 12)}…</code></td><td><a class="download" href="${r.download_url}">Download</a></td></tr>`).join("")}</tbody></table>`; updateDeleteButton(); };
-    const load = async () => { try { const [latest, history] = await Promise.all([api("/api/v1/app/releases/latest").catch(() => null), api("/api/v1/app/releases")]); renderLatest(latest); renderHistory(history.releases || []); } catch (error) { renderLatest(null); $("history").innerHTML = `<div class="empty">${error.message}</div>`; } };
+    const updateDeleteButton = () => { const count = selectedCodes().length; const button = $("delete-selected"); if (!button) return; button.disabled = count === 0; button.textContent = count ? `${t("deleteSelected")} (${count})` : t("deleteSelected"); };
+    const renderHistory = (releases) => { if (!releases.length) { $("history").innerHTML = `<div class="empty">${t("noReleases")}</div>`; updateDeleteButton(); return; } $("history").innerHTML = `<table><thead><tr><th>${t("select")}</th><th>${t("versionName")}</th><th>${t("versionCode")}</th><th>${t("published")}</th><th>${t("size")}</th><th>SHA-256</th><th></th></tr></thead><tbody>${releases.map((r) => `<tr><td><input class="release-select" type="checkbox" data-version-code="${r.version_code}" aria-label="${t("selectVersion", { version: r.version_name })}"></td><td><strong>v${r.version_name}</strong></td><td>${r.version_code}</td><td>${formatDate(r.published_at)}</td><td>${formatBytes(r.size_bytes)}</td><td><code title="${r.sha256}">${r.sha256.slice(0, 12)}…</code></td><td><a class="download" href="${r.download_url}">${t("download")}</a></td></tr>`).join("")}</tbody></table>`; updateDeleteButton(); };
+    const load = async () => { try { const historyPath = `/api/v1/app/releases?fresh=${Date.now()}`; const [latest, history] = await Promise.all([api("/api/v1/app/releases/latest").catch(() => null), api(historyPath, { cache: "no-store" })]); renderLatest(latest); renderHistory(history.releases || []); } catch (error) { renderLatest(null); $("history").innerHTML = `<div class="empty">${error.message}</div>`; } };
+    $("language-toggle").addEventListener("click", async () => { language = language === "en" ? "zh" : "en"; window.localStorage.setItem("parabeacon-language", language); applyLanguage(); await load(); });
     $("refresh").addEventListener("click", load);
     $("history").addEventListener("change", (event) => { if (event.target.matches(".release-select")) updateDeleteButton(); });
-    $("delete-selected").addEventListener("click", async () => { const codes = selectedCodes(); if (!codes.length) return; if (!$("token").value.trim()) { setNotice("Enter the admin token before deleting releases.", "error"); $("token").focus(); return; } if (!window.confirm(`Delete ${codes.length} release(s)? Their APK files will no longer be downloadable.`)) return; const button = $("delete-selected"); button.disabled = true; setNotice("Deleting selected releases…"); try { for (const code of codes) await api(`/api/v1/admin/app/releases/${encodeURIComponent(code)}`, { method: "DELETE", headers: { "X-Release-Admin-Token": $("token").value.trim() } }); setNotice(`Deleted ${codes.length} release(s).`, "success"); await load(); } catch (error) { setNotice(error.message, "error"); updateDeleteButton(); } });
-    $("publish-form").addEventListener("submit", async (event) => { event.preventDefault(); const button = $("publish"); const file = $("apk").files[0]; if (!file) return; button.disabled = true; setNotice("Uploading and validating APK…"); try { await api("/api/v1/admin/app/releases", { method: "POST", headers: { "X-Release-Admin-Token": $("token").value, "X-APK-Version": $("version-name").value.trim(), "X-APK-Version-Code": $("version-code").value, "Content-Type": "application/vnd.android.package-archive" }, body: file }); setNotice("Release published successfully.", "success"); $("publish-form").reset(); await load(); } catch (error) { setNotice(error.message, "error"); } finally { button.disabled = false; } });
+    $("delete-selected").addEventListener("click", async () => { const codes = selectedCodes(); if (!codes.length) return; if (!$("token").value.trim()) { setNotice(t("enterTokenDelete"), "error"); $("token").focus(); return; } if (!window.confirm(t("confirmDelete", { count: codes.length }))) return; const button = $("delete-selected"); button.disabled = true; setNotice(t("deleting")); try { for (const code of codes) await api(`/api/v1/admin/app/releases/${encodeURIComponent(code)}`, { method: "DELETE", headers: { "X-Release-Admin-Token": $("token").value.trim() } }); setNotice(t("deleted", { count: codes.length }), "success"); await load(); } catch (error) { setNotice(error.message, "error"); updateDeleteButton(); } });
+    $("publish-form").addEventListener("submit", async (event) => { event.preventDefault(); const button = $("publish"); const file = $("apk").files[0]; if (!file) return; button.disabled = true; setNotice(t("uploading")); try { await api("/api/v1/admin/app/releases", { method: "POST", headers: { "X-Release-Admin-Token": $("token").value, "X-APK-Version": $("version-name").value.trim(), "X-APK-Version-Code": $("version-code").value, "Content-Type": "application/vnd.android.package-archive" }, body: file }); setNotice(t("publishedSuccess"), "success"); $("publish-form").reset(); await load(); } catch (error) { setNotice(error.message, "error"); } finally { button.disabled = false; } });
+    applyLanguage();
     load();
   </script>
 </body>
