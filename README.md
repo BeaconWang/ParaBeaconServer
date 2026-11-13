@@ -90,6 +90,23 @@ Fetch public pilot locations within a WGS-84 viewport using authenticated `GET /
 
 Authenticated `GET /api/v1/flight-logs` and `/api/v1/chat` remain reserved and return `501 Not Implemented`; Redis client initialization is available for future modules.
 
+## Android APK releases
+
+APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./data/apks`) and indexed in the `app_releases` table by Android `versionCode`. Mount that directory on persistent storage in production. Set `APK_PACKAGE_NAME` to the Android application ID. Public clients can query `GET /api/v1/app/releases/latest` and download the returned `download_url`; downloads are served as APK attachments and include a SHA-256 digest and byte size for client verification.
+
+Publishing is disabled unless `APK_RELEASE_ADMIN_TOKEN` contains a secret of at least 32 characters. Keep it in a secret manager; never include it in the app. Upload a signed APK directly as the request body:
+
+```sh
+curl -X POST http://localhost:8080/api/v1/admin/app/releases \
+  -H 'X-Release-Admin-Token: YOUR_RELEASE_ADMIN_TOKEN' \
+  -H 'X-APK-Version: 1.2.3' \
+  -H 'X-APK-Version-Code: 123' \
+  -H 'Content-Type: application/vnd.android.package-archive' \
+  --data-binary @build/app/outputs/flutter-apk/app-release.apk
+```
+
+The server limits uploads to 512 MiB, verifies the APK archive contains `AndroidManifest.xml`, records its digest and generated storage key, and refuses duplicate version codes. Android verifies the APK signing certificate when the user installs it; every release must be signed with the same production signing key and use a strictly increasing `versionCode`. The server uses a ten-minute HTTP body/read timeout to support APK transfer; keep equivalent or longer proxy timeouts at the ingress.
+
 ## Tests and build
 
 ```sh

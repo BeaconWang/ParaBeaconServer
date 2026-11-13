@@ -12,15 +12,18 @@ import (
 )
 
 type Config struct {
-	Environment       string
-	HTTPAddress       string
-	DatabaseDSN       string
-	RedisURL          string
-	JWTSecret         string
-	JWTIssuer         string
-	JWTExpiry         time.Duration
-	CORSAllowedOrigin []string
-	TrustedProxies    []string
+	Environment          string
+	HTTPAddress          string
+	DatabaseDSN          string
+	RedisURL             string
+	JWTSecret            string
+	JWTIssuer            string
+	JWTExpiry            time.Duration
+	CORSAllowedOrigin    []string
+	TrustedProxies       []string
+	APKStorageDir        string
+	APKPackageName       string
+	APKReleaseAdminToken string
 }
 
 func Load() (Config, error) {
@@ -46,15 +49,18 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Environment:       environment,
-		HTTPAddress:       ":" + port,
-		DatabaseDSN:       databaseDSN,
-		RedisURL:          strings.TrimSpace(os.Getenv("REDIS_URL")),
-		JWTSecret:         os.Getenv("JWT_SECRET"),
-		JWTIssuer:         env("JWT_ISSUER", "parabeacon-api"),
-		JWTExpiry:         expiry,
-		CORSAllowedOrigin: splitCSV(os.Getenv("CORS_ALLOWED_ORIGINS")),
-		TrustedProxies:    splitCSV(os.Getenv("TRUSTED_PROXIES")),
+		Environment:          environment,
+		HTTPAddress:          ":" + port,
+		DatabaseDSN:          databaseDSN,
+		RedisURL:             strings.TrimSpace(os.Getenv("REDIS_URL")),
+		JWTSecret:            os.Getenv("JWT_SECRET"),
+		JWTIssuer:            env("JWT_ISSUER", "parabeacon-api"),
+		JWTExpiry:            expiry,
+		CORSAllowedOrigin:    splitCSV(os.Getenv("CORS_ALLOWED_ORIGINS")),
+		TrustedProxies:       splitCSV(os.Getenv("TRUSTED_PROXIES")),
+		APKStorageDir:        env("APK_STORAGE_DIR", "./data/apks"),
+		APKPackageName:       env("APK_PACKAGE_NAME", "com.beacon.parabeacon"),
+		APKReleaseAdminToken: os.Getenv("APK_RELEASE_ADMIN_TOKEN"),
 	}
 	if cfg.DatabaseDSN == "" {
 		return Config{}, fmt.Errorf("DATABASE_DSN is required")

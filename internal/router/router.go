@@ -47,6 +47,16 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	trackingRepo := repository.NewTrackingRepository(db)
 	trackingService := service.NewTrackingService(trackingRepo)
 	trackingHandler := handler.NewTrackingHandler(trackingService)
+	appReleaseRepository := repository.NewAppReleaseRepository(db)
+	appReleaseService, err := service.NewAppReleaseService(
+		appReleaseRepository,
+		cfg.APKStorageDir,
+		cfg.APKPackageName,
+	)
+	if err != nil {
+		return nil, err
+	}
+	appReleaseHandler := handler.NewAppReleaseHandler(appReleaseService)
 	v1 := engine.Group("/api/v1")
 	{
 		auth := v1.Group("/auth")
@@ -54,6 +64,10 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		auth.POST("/login", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), authHandler.Login)
 		auth.POST("/refresh", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), authHandler.Refresh)
 		auth.POST("/logout", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), authHandler.Logout)
+
+		v1.GET("/app/releases/latest", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), appReleaseHandler.Latest)
+		v1.GET("/app/releases/:version_code/download", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), appReleaseHandler.Download)
+		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Publish)
 
 		protected := v1.Group("")
 		protected.Use(middleware.RequireAuth(tokens))

@@ -3,5 +3,6 @@
 !.env.example
 /bin/
 /dist/
+/data/apks/
 *.exe
 *.test
