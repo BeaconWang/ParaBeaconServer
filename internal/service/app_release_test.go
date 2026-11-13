@@ -34,6 +34,16 @@ func (r *memoryAppReleaseRepository) Create(_ context.Context, release *model.Ap
 	return nil
 }
 
+func (r *memoryAppReleaseRepository) ListPublished(_ context.Context, packageName string) ([]model.AppRelease, error) {
+	result := make([]model.AppRelease, 0, len(r.releases))
+	for _, release := range r.releases {
+		if release.PackageName == packageName && release.PublishedAt != nil {
+			result = append(result, *release)
+		}
+	}
+	return result, nil
+}
+
 func (r *memoryAppReleaseRepository) Latest(_ context.Context, packageName string) (*model.AppRelease, error) {
 	var latest *model.AppRelease
 	for _, release := range r.releases {

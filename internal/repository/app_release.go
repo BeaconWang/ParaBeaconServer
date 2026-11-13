@@ -15,6 +15,7 @@ var (
 
 type AppReleaseRepository interface {
 	Create(ctx context.Context, release *model.AppRelease) error
+	ListPublished(ctx context.Context, packageName string) ([]model.AppRelease, error)
 	Latest(ctx context.Context, packageName string) (*model.AppRelease, error)
 	FindPublished(ctx context.Context, packageName string, versionCode int64) (*model.AppRelease, error)
 }
@@ -33,6 +34,18 @@ func (r *GormAppReleaseRepository) Create(ctx context.Context, release *model.Ap
 		return ErrAppReleaseAlreadyExists
 	}
 	return err
+}
+
+func (r *GormAppReleaseRepository) ListPublished(ctx context.Context, packageName string) ([]model.AppRelease, error) {
+	var releases []model.AppRelease
+	if err := r.db.WithContext(ctx).
+		Where("package_name = ? AND published_at IS NOT NULL", packageName).
+		Order("version_code DESC").
+		Limit(100).
+		Find(&releases).Error; err != nil {
+		return nil, err
+	}
+	return releases, nil
 }
 
 func (r *GormAppReleaseRepository) Latest(ctx context.Context, packageName string) (*model.AppRelease, error) {

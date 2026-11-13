@@ -107,6 +107,10 @@ curl -X POST http://localhost:8080/api/v1/admin/app/releases \
 
 The server limits uploads to 512 MiB, verifies the APK archive contains `AndroidManifest.xml`, records its digest and generated storage key, and refuses duplicate version codes. Android verifies the APK signing certificate when the user installs it; every release must be signed with the same production signing key and use a strictly increasing `versionCode`. The server uses a ten-minute HTTP body/read timeout to support APK transfer; keep equivalent or longer proxy timeouts at the ingress.
 
+### Release management web UI
+
+Open the server root URL (`/`) to use the embedded release management console. Enter the `APK_RELEASE_ADMIN_TOKEN` only when publishing or viewing the protected release history; the page keeps it in memory and does not write it to browser storage. The console supports signed APK upload, version metadata, release history, SHA-256 inspection, and downloads. Published releases are immutable, and the public latest-release API remains available to app clients.
+
 ## Tests and build
 
 ```sh

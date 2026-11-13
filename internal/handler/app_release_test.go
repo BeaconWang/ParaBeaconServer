@@ -23,6 +23,13 @@ type appReleaseHandlerTestService struct {
 	bytes   string
 }
 
+func (s *appReleaseHandlerTestService) ListPublished(context.Context) ([]model.AppRelease, error) {
+	if s.release == nil {
+		return []model.AppRelease{}, nil
+	}
+	return []model.AppRelease{*s.release}, nil
+}
+
 func (s *appReleaseHandlerTestService) Latest(context.Context) (*model.AppRelease, error) {
 	return s.release, nil
 }
@@ -57,6 +64,31 @@ func TestLatestAppReleaseReturnsDownloadMetadata(t *testing.T) {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
 	for _, value := range []string{`"version_name":"1.2.3"`, `"version_code":123`, `"sha256":"` + strings.Repeat("a", 64) + `"`, `"download_url":"/api/v1/app/releases/123/download"`} {
+		if !strings.Contains(response.Body.String(), value) {
+			t.Errorf("response missing %s: %s", value, response.Body.String())
+		}
+	}
+}
+
+func TestListAppReleasesReturnsProtectedHistoryMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	published := ptrTime(time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC))
+	release := &model.AppRelease{
+		VersionName: "1.2.3",
+		VersionCode: 123,
+		PackageName: "com.beacon.parabeacon",
+		SizeBytes:   4096,
+		SHA256:      strings.Repeat("c", 64),
+		PublishedAt: published,
+	}
+	engine := gin.New()
+	engine.GET("/api/v1/admin/app/releases", NewAppReleaseHandler(&appReleaseHandlerTestService{release: release}).List)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/admin/app/releases", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	for _, value := range []string{`"releases"`, `"version_name":"1.2.3"`, `"published_at":"2026-11-13T10:00:00Z"`} {
 		if !strings.Contains(response.Body.String(), value) {
 			t.Errorf("response missing %s: %s", value, response.Body.String())
 		}

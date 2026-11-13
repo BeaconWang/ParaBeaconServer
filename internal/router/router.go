@@ -11,6 +11,7 @@ import (
 	"github.com/parabeacon/server/internal/middleware"
 	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/internal/service"
+	webapp "github.com/parabeacon/server/internal/web"
 	"github.com/parabeacon/server/pkg/utils"
 	"gorm.io/gorm"
 )
@@ -29,6 +30,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	if err != nil {
 		return nil, err
 	}
+	engine.GET("/", gin.WrapH(webapp.Handler()))
 	engine.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -67,6 +69,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 
 		v1.GET("/app/releases/latest", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), appReleaseHandler.Latest)
 		v1.GET("/app/releases/:version_code/download", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), appReleaseHandler.Download)
+		v1.GET("/admin/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.List)
 		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Publish)
 
 		protected := v1.Group("")

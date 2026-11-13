@@ -31,6 +31,7 @@ var (
 
 type AppReleaseRepository interface {
 	Create(ctx context.Context, release *model.AppRelease) error
+	ListPublished(ctx context.Context, packageName string) ([]model.AppRelease, error)
 	Latest(ctx context.Context, packageName string) (*model.AppRelease, error)
 	FindPublished(ctx context.Context, packageName string, versionCode int64) (*model.AppRelease, error)
 }
@@ -52,6 +53,10 @@ func NewAppReleaseService(releases AppReleaseRepository, storageRoot, packageNam
 		return nil, fmt.Errorf("resolve APK storage directory: %w", err)
 	}
 	return &AppReleaseService{releases: releases, storageRoot: root, packageName: packageName}, nil
+}
+
+func (s *AppReleaseService) ListPublished(ctx context.Context) ([]model.AppRelease, error) {
+	return s.releases.ListPublished(ctx, s.packageName)
 }
 
 func (s *AppReleaseService) Latest(ctx context.Context) (*model.AppRelease, error) {
