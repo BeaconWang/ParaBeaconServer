@@ -34,11 +34,14 @@
     input:focus { border-color:var(--accent-2); box-shadow:0 0 0 3px #7e9cff22; }
     input[type=file] { padding:9px; }
     input[type=file]::file-selector-button { margin-right:10px; border:0; border-radius:8px; padding:7px 10px; color:#07131a; background:var(--accent); font-weight:800; cursor:pointer; }
+    input[type=checkbox] { width:auto; accent-color:var(--accent); }
     .row { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
     button, .button { border:0; border-radius:12px; padding:12px 16px; color:#06131a; background:var(--accent); font:inherit; font-weight:800; cursor:pointer; transition:transform .15s, filter .15s; }
     button:hover, .button:hover { filter:brightness(1.08); transform:translateY(-1px); }
     button:disabled { cursor:wait; opacity:.55; transform:none; }
     .secondary { color:var(--text); background:var(--panel-2); border:1px solid var(--line); }
+    .danger { color:#2a0a12; background:var(--danger); }
+    .history-actions { display:flex; align-items:center; gap:10px; }
     .notice { min-height:24px; color:var(--muted); font-size:13px; }
     .notice.error { color:var(--danger); }
     .notice.success { color:var(--accent); }
@@ -86,7 +89,7 @@
       </article>
 
       <article class="panel history">
-        <div class="panel-header"><div><h2>Release history</h2><div class="release-meta">The server keeps published builds immutable.</div></div></div>
+        <div class="panel-header"><div><h2>Release history</h2><div class="release-meta">Select published builds to remove them from public downloads.</div></div><div class="history-actions"><button id="delete-selected" class="danger" type="button" disabled>Delete selected</button></div></div>
         <div id="history"><div class="empty">Loading release history…</div></div>
       </article>
     </section>
@@ -99,9 +102,13 @@
     const setNotice = (message, kind = "") => { $("notice").textContent = message; $("notice").className = `notice ${kind}`; };
     const api = async (path, options = {}) => { const response = await fetch(path, options); let body = {}; try { body = await response.json(); } catch (_) {} if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`); return body; };
     const renderLatest = (release) => { $("latest").innerHTML = release ? `<div><div class="eyebrow">${release.package_name}</div><div class="release-version">v${release.version_name}</div><div class="release-meta">Version code ${release.version_code} · Published ${formatDate(release.published_at)}</div></div><div class="stats"><div class="stat"><strong>${formatBytes(release.size_bytes)}</strong><span>Package size</span></div><div class="stat"><strong>${release.sha256.slice(0, 12)}…</strong><span>SHA-256</span></div><a class="button" href="${release.download_url}">Download APK</a></div>` : `<div class="empty">No release has been published yet.</div>`; };
-    const renderHistory = (releases) => { if (!releases.length) { $("history").innerHTML = `<div class="empty">No releases found.</div>`; return; } $("history").innerHTML = `<table><thead><tr><th>Version</th><th>Code</th><th>Published</th><th>Size</th><th>SHA-256</th><th></th></tr></thead><tbody>${releases.map((r) => `<tr><td><strong>v${r.version_name}</strong></td><td>${r.version_code}</td><td>${formatDate(r.published_at)}</td><td>${formatBytes(r.size_bytes)}</td><td><code title="${r.sha256}">${r.sha256.slice(0, 12)}…</code></td><td><a class="download" href="${r.download_url}">Download</a></td></tr>`).join("")}</tbody></table>`; };
+    const selectedCodes = () => [...document.querySelectorAll(".release-select:checked")].map((input) => input.dataset.versionCode);
+    const updateDeleteButton = () => { const count = selectedCodes().length; const button = $("delete-selected"); button.disabled = count === 0; button.textContent = count ? `Delete selected (${count})` : "Delete selected"; };
+    const renderHistory = (releases) => { if (!releases.length) { $("history").innerHTML = `<div class="empty">No releases found.</div>`; updateDeleteButton(); return; } $("history").innerHTML = `<table><thead><tr><th>Select</th><th>Version</th><th>Code</th><th>Published</th><th>Size</th><th>SHA-256</th><th></th></tr></thead><tbody>${releases.map((r) => `<tr><td><input class="release-select" type="checkbox" data-version-code="${r.version_code}" aria-label="Select version ${r.version_name}"></td><td><strong>v${r.version_name}</strong></td><td>${r.version_code}</td><td>${formatDate(r.published_at)}</td><td>${formatBytes(r.size_bytes)}</td><td><code title="${r.sha256}">${r.sha256.slice(0, 12)}…</code></td><td><a class="download" href="${r.download_url}">Download</a></td></tr>`).join("")}</tbody></table>`; updateDeleteButton(); };
     const load = async () => { try { const [latest, history] = await Promise.all([api("/api/v1/app/releases/latest").catch(() => null), api("/api/v1/app/releases")]); renderLatest(latest); renderHistory(history.releases || []); } catch (error) { renderLatest(null); $("history").innerHTML = `<div class="empty">${error.message}</div>`; } };
     $("refresh").addEventListener("click", load);
+    $("history").addEventListener("change", (event) => { if (event.target.matches(".release-select")) updateDeleteButton(); });
+    $("delete-selected").addEventListener("click", async () => { const codes = selectedCodes(); if (!codes.length) return; if (!$("token").value.trim()) { setNotice("Enter the admin token before deleting releases.", "error"); $("token").focus(); return; } if (!window.confirm(`Delete ${codes.length} release(s)? Their APK files will no longer be downloadable.`)) return; const button = $("delete-selected"); button.disabled = true; setNotice("Deleting selected releases…"); try { for (const code of codes) await api(`/api/v1/admin/app/releases/${encodeURIComponent(code)}`, { method: "DELETE", headers: { "X-Release-Admin-Token": $("token").value.trim() } }); setNotice(`Deleted ${codes.length} release(s).`, "success"); await load(); } catch (error) { setNotice(error.message, "error"); updateDeleteButton(); } });
     $("publish-form").addEventListener("submit", async (event) => { event.preventDefault(); const button = $("publish"); const file = $("apk").files[0]; if (!file) return; button.disabled = true; setNotice("Uploading and validating APK…"); try { await api("/api/v1/admin/app/releases", { method: "POST", headers: { "X-Release-Admin-Token": $("token").value, "X-APK-Version": $("version-name").value.trim(), "X-APK-Version-Code": $("version-code").value, "Content-Type": "application/vnd.android.package-archive" }, body: file }); setNotice("Release published successfully.", "success"); $("publish-form").reset(); await load(); } catch (error) { setNotice(error.message, "error"); } finally { button.disabled = false; } });
     load();
   </script>

@@ -58,6 +58,15 @@ func (r *memoryAppReleaseRepository) Latest(_ context.Context, packageName strin
 	return latest, nil
 }
 
+func (r *memoryAppReleaseRepository) Delete(_ context.Context, packageName string, versionCode int64) error {
+	release := r.releases[versionCode]
+	if release == nil || release.PackageName != packageName || release.PublishedAt == nil {
+		return repository.ErrAppReleaseNotFound
+	}
+	delete(r.releases, versionCode)
+	return nil
+}
+
 func (r *memoryAppReleaseRepository) FindPublished(_ context.Context, packageName string, versionCode int64) (*model.AppRelease, error) {
 	release := r.releases[versionCode]
 	if release == nil || release.PackageName != packageName || release.PublishedAt == nil {
@@ -126,6 +135,29 @@ func TestAppReleasePublishStoresAPKAndLatestMetadata(t *testing.T) {
 	downloaded, path, err := service.FindPublished(ctx, release.VersionCode)
 	if err != nil || downloaded.StorageKey != release.StorageKey || path != filepath.Join(storageRoot, release.StorageKey) {
 		t.Fatalf("FindPublished() = %#v, %q, error = %v", downloaded, path, err)
+	}
+}
+
+func TestAppReleaseDeleteRemovesMetadataAndAPK(t *testing.T) {
+	releaseRepository := newMemoryAppReleaseRepository()
+	storageRoot := t.TempDir()
+	service, err := NewAppReleaseService(releaseRepository, storageRoot, "com.beacon.parabeacon")
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := service.Publish(context.Background(), "1.2.3", 123, bytes.NewReader(makeTestAPK(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(storageRoot, release.StorageKey)
+	if err := service.Delete(context.Background(), release.VersionCode); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("APK still exists, error = %v", err)
+	}
+	if _, _, err := service.FindPublished(context.Background(), release.VersionCode); !errors.Is(err, repository.ErrAppReleaseNotFound) {
+		t.Fatalf("FindPublished() error = %v, want not found", err)
 	}
 }
 

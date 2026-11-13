@@ -43,6 +43,10 @@ func (s *appReleaseHandlerTestService) Publish(_ context.Context, versionName st
 	return s.release, nil
 }
 
+func (s *appReleaseHandlerTestService) Delete(context.Context, int64) error {
+	return nil
+}
+
 func (s *appReleaseHandlerTestService) FindPublished(context.Context, int64) (*model.AppRelease, string, error) {
 	return s.release, s.path, nil
 }
@@ -92,6 +96,17 @@ func TestListAppReleasesReturnsProtectedHistoryMetadata(t *testing.T) {
 		if !strings.Contains(response.Body.String(), value) {
 			t.Errorf("response missing %s: %s", value, response.Body.String())
 		}
+	}
+}
+
+func TestDeleteAppReleaseReturnsNoContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.DELETE("/api/v1/admin/app/releases/:version_code", NewAppReleaseHandler(&appReleaseHandlerTestService{}).Delete)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/api/v1/admin/app/releases/123", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
 }
 

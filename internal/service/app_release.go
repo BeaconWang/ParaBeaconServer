@@ -34,6 +34,7 @@ type AppReleaseRepository interface {
 	ListPublished(ctx context.Context, packageName string) ([]model.AppRelease, error)
 	Latest(ctx context.Context, packageName string) (*model.AppRelease, error)
 	FindPublished(ctx context.Context, packageName string, versionCode int64) (*model.AppRelease, error)
+	Delete(ctx context.Context, packageName string, versionCode int64) error
 }
 
 type AppReleaseService struct {
@@ -137,6 +138,34 @@ func validateAPK(path string, size int64) error {
 		}
 	}
 	return ErrInvalidAPK
+}
+
+func (s *AppReleaseService) Delete(ctx context.Context, versionCode int64) error {
+	if versionCode < 1 || versionCode > 2100000000 {
+		return ErrInvalidAppRelease
+	}
+	release, path, err := s.FindPublished(ctx, versionCode)
+	if err != nil {
+		return err
+	}
+	tombstone := filepath.Join(s.storageRoot, ".delete-"+uuid.NewString()+".apk")
+	if err := os.Rename(path, tombstone); err != nil {
+		return fmt.Errorf("stage APK deletion: %w", err)
+	}
+	deleted := false
+	defer func() {
+		if !deleted {
+			_ = os.Rename(tombstone, path)
+		}
+	}()
+	if err := s.releases.Delete(ctx, s.packageName, release.VersionCode); err != nil {
+		return err
+	}
+	deleted = true
+	if err := os.Remove(tombstone); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove deleted APK: %w", err)
+	}
+	return nil
 }
 
 func (s *AppReleaseService) FindPublished(ctx context.Context, versionCode int64) (*model.AppRelease, string, error) {

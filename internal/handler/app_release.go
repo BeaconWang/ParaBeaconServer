@@ -20,6 +20,7 @@ type AppReleaseService interface {
 	ListPublished(ctx context.Context) ([]model.AppRelease, error)
 	Latest(ctx context.Context) (*model.AppRelease, error)
 	Publish(ctx context.Context, versionName string, versionCode int64, source io.Reader) (*model.AppRelease, error)
+	Delete(ctx context.Context, versionCode int64) error
 	FindPublished(ctx context.Context, versionCode int64) (*model.AppRelease, string, error)
 }
 
@@ -104,6 +105,26 @@ func (h *AppReleaseHandler) Download(c *gin.Context) {
 	c.Header("Content-Type", "application/vnd.android.package-archive")
 	c.Header("ETag", `"`+release.SHA256+`"`)
 	c.FileAttachment(path, fmt.Sprintf("parabeacon-%s.apk", release.VersionName))
+}
+
+func (h *AppReleaseHandler) Delete(c *gin.Context) {
+	versionCode, err := strconv.ParseInt(c.Param("version_code"), 10, 64)
+	if err != nil || versionCode < 1 {
+		respondError(c, http.StatusBadRequest, "invalid app version code")
+		return
+	}
+	if err := h.releases.Delete(c.Request.Context(), versionCode); err != nil {
+		switch {
+		case service.IsAppReleaseNotFound(err):
+			respondError(c, http.StatusNotFound, "app release not found")
+		case errors.Is(err, service.ErrInvalidAppRelease):
+			respondError(c, http.StatusBadRequest, "invalid app version code")
+		default:
+			respondInternalError(c)
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *AppReleaseHandler) Publish(c *gin.Context) {
