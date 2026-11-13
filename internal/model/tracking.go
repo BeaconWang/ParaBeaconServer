@@ -7,13 +7,23 @@ import (
 )
 
 type LiveTrackSession struct {
-	ID        uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
-	UserID    uuid.UUID  `gorm:"type:uuid;not null;index" json:"-"`
-	PilotName string     `gorm:"size:32;not null" json:"pilot_name"`
-	StartedAt time.Time  `gorm:"not null;index" json:"started_at"`
-	EndedAt   *time.Time `gorm:"index" json:"ended_at,omitempty"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID            uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	UserID        uuid.UUID  `gorm:"type:uuid;not null;index" json:"-"`
+	PilotName     string     `gorm:"size:32;not null" json:"pilot_name"`
+	StartedAt     time.Time  `gorm:"not null;index" json:"started_at"`
+	EndedAt       *time.Time `gorm:"index" json:"ended_at,omitempty"`
+	PubliclyShare bool       `gorm:"not null;default:false;index" json:"-"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+type PublicPilotLocation struct {
+	SessionID  uuid.UUID `gorm:"column:session_id" json:"-"`
+	PilotName  string    `gorm:"column:pilot_name" json:"pilot_name"`
+	Latitude   float64   `gorm:"column:latitude" json:"lat"`
+	Longitude  float64   `gorm:"column:longitude" json:"lon"`
+	Heading    *float64  `gorm:"column:heading" json:"heading,omitempty"`
+	ObservedAt time.Time `gorm:"column:observed_at" json:"observed_at"`
 }
 
 type LiveTrackPoint struct {

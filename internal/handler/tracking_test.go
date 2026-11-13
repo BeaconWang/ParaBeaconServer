@@ -1,0 +1,166 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/parabeacon/server/internal/middleware"
+	"github.com/parabeacon/server/internal/model"
+)
+
+type trackingHandlerTestService struct {
+	userID        uuid.UUID
+	sessionID     uuid.UUID
+	publiclyShare bool
+	south         float64
+	north         float64
+	west          float64
+	east          float64
+	after         uuid.UUID
+	locations     []model.PublicPilotLocation
+}
+
+func (s *trackingHandlerTestService) StartSession(_ context.Context, userID uuid.UUID, pilotName string, startedAt time.Time, publiclyShare bool) (*model.LiveTrackSession, error) {
+	s.userID = userID
+	s.publiclyShare = publiclyShare
+	return &model.LiveTrackSession{ID: uuid.New(), UserID: userID, PilotName: pilotName, StartedAt: startedAt, PubliclyShare: publiclyShare}, nil
+}
+
+func (*trackingHandlerTestService) StorePoints(context.Context, uuid.UUID, uuid.UUID, []model.LiveTrackPoint) (int64, error) {
+	return 0, nil
+}
+
+func (*trackingHandlerTestService) StopSession(context.Context, uuid.UUID, uuid.UUID, time.Time) error {
+	return nil
+}
+
+func (*trackingHandlerTestService) ListActiveSessions(context.Context, uuid.UUID) ([]model.LiveTrackSession, error) {
+	return nil, nil
+}
+
+func (s *trackingHandlerTestService) SetPublicSharing(_ context.Context, userID, sessionID uuid.UUID, enabled bool) error {
+	s.userID = userID
+	s.sessionID = sessionID
+	s.publiclyShare = enabled
+	return nil
+}
+
+func (s *trackingHandlerTestService) ListPublicLocations(_ context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error) {
+	s.userID = userID
+	s.south, s.north, s.west, s.east, s.after = south, north, west, east, after
+	return s.locations, nil
+}
+
+func TestListPublicLocationsRequiresBoundsAndReturnsOnlyMapFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &trackingHandlerTestService{
+		locations: []model.PublicPilotLocation{{
+			SessionID:  uuid.New(),
+			PilotName:  "pilot_one",
+			Latitude:   47.1,
+			Longitude:  8.5,
+			ObservedAt: time.Now().UTC(),
+		}},
+	}
+	userID := uuid.New()
+	engine := gin.New()
+	engine.GET("/map/active-locations", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		NewTrackingHandler(service).ListPublicLocations(c)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/map/active-locations?west=8&south=47&east=9&north=48", nil)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if service.userID != userID {
+		t.Fatalf("requester id = %s, want %s", service.userID, userID)
+	}
+	if service.south != 47 || service.north != 48 || service.west != 8 || service.east != 9 {
+		t.Fatalf("bounds = %v %v %v %v", service.south, service.north, service.west, service.east)
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	var locations []map[string]json.RawMessage
+	if err := json.Unmarshal(payload["locations"], &locations); err != nil {
+		t.Fatalf("decode locations: %v", err)
+	}
+	if len(locations) != 1 {
+		t.Fatalf("location count = %d, want 1", len(locations))
+	}
+	for _, privateField := range []string{"session_id", "user_id", "id", "altitude", "speed"} {
+		if _, exists := locations[0][privateField]; exists {
+			t.Errorf("public location unexpectedly contains %q", privateField)
+		}
+	}
+	if _, exists := locations[0]["pilot_name"]; !exists {
+		t.Fatal("public location has no pilot display name")
+	}
+}
+
+func TestListPublicLocationsRejectsInvalidBoundsAndCursor(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	service := &trackingHandlerTestService{}
+	engine.GET("/map/active-locations", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, uuid.New())
+		NewTrackingHandler(service).ListPublicLocations(c)
+	})
+	for _, target := range []string{
+		"/map/active-locations?west=0&south=20&east=1",
+		"/map/active-locations?west=0&south=0&east=1&north=1&cursor=not-a-uuid",
+	} {
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("GET %s status = %d, want %d", target, response.Code, http.StatusBadRequest)
+		}
+	}
+}
+
+func TestSetPublicSharingAndStartSessionHonorConsent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &trackingHandlerTestService{}
+	userID := uuid.New()
+	engine := gin.New()
+	engine.POST("/tracking/sessions", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		NewTrackingHandler(service).Start(c)
+	})
+	engine.PATCH("/tracking/sessions/:session_id/public-sharing", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		NewTrackingHandler(service).SetPublicSharing(c)
+	})
+	startedAt := time.Now().UTC().Truncate(time.Second)
+	body, _ := json.Marshal(map[string]any{
+		"pilot_name":     "pilot_one",
+		"start_time":     startedAt,
+		"publicly_share": true,
+	})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/tracking/sessions", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !service.publiclyShare || service.userID != userID {
+		t.Fatalf("start status=%d consent=%v user=%s body=%s", response.Code, service.publiclyShare, service.userID, response.Body.String())
+	}
+
+	sessionID := uuid.New()
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPatch, "/tracking/sessions/"+sessionID.String()+"/public-sharing", strings.NewReader(`{"publicly_share":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || service.publiclyShare || service.userID != userID || service.sessionID != sessionID {
+		t.Fatalf("sharing status=%d consent=%v user=%s session=%s", response.Code, service.publiclyShare, service.userID, service.sessionID)
+	}
+}

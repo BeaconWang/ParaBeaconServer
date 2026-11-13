@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -14,10 +15,12 @@ import (
 )
 
 type TrackingService interface {
-	StartSession(ctx context.Context, userID uuid.UUID, pilotName string, startedAt time.Time) (*model.LiveTrackSession, error)
+	StartSession(ctx context.Context, userID uuid.UUID, pilotName string, startedAt time.Time, publiclyShare bool) (*model.LiveTrackSession, error)
 	StorePoints(ctx context.Context, userID, sessionID uuid.UUID, points []model.LiveTrackPoint) (int64, error)
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
+	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
+	ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error)
 }
 
 type TrackingHandler struct {
@@ -29,8 +32,13 @@ func NewTrackingHandler(tracking TrackingService) *TrackingHandler {
 }
 
 type startTrackingRequest struct {
-	PilotName string    `json:"pilot_name"`
-	StartTime time.Time `json:"start_time"`
+	PilotName     string    `json:"pilot_name"`
+	StartTime     time.Time `json:"start_time"`
+	PubliclyShare bool      `json:"publicly_share"`
+}
+
+type publicSharingRequest struct {
+	PubliclyShare *bool `json:"publicly_share"`
 }
 
 type stopTrackingRequest struct {
@@ -71,6 +79,68 @@ func (h *TrackingHandler) ListActive(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
 }
 
+func (h *TrackingHandler) ListPublicLocations(c *gin.Context) {
+	userID, ok := trackingUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	parseBound := func(key string) (float64, bool) {
+		value, err := strconv.ParseFloat(c.Query(key), 64)
+		return value, err == nil
+	}
+	west, westOK := parseBound("west")
+	south, southOK := parseBound("south")
+	east, eastOK := parseBound("east")
+	north, northOK := parseBound("north")
+	if !westOK || !southOK || !eastOK || !northOK {
+		respondError(c, http.StatusBadRequest, "invalid map bounds")
+		return
+	}
+	var after uuid.UUID
+	if cursor := c.Query("cursor"); cursor != "" {
+		parsed, err := uuid.Parse(cursor)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		after = parsed
+	}
+	locations, err := h.tracking.ListPublicLocations(c.Request.Context(), userID, south, north, west, east, after)
+	if err != nil {
+		respondTrackingError(c, err)
+		return
+	}
+	nextCursor := ""
+	if len(locations) == service.PublicLocationPageSize {
+		nextCursor = locations[len(locations)-1].SessionID.String()
+	}
+	c.JSON(http.StatusOK, gin.H{"locations": locations, "next_cursor": nextCursor})
+}
+
+func (h *TrackingHandler) SetPublicSharing(c *gin.Context) {
+	userID, ok := trackingUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sessionID, err := uuid.Parse(c.Param("session_id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid session id")
+		return
+	}
+	var request publicSharingRequest
+	if err := c.ShouldBindJSON(&request); err != nil || request.PubliclyShare == nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.tracking.SetPublicSharing(c.Request.Context(), userID, sessionID, *request.PubliclyShare); err != nil {
+		respondTrackingError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *TrackingHandler) Start(c *gin.Context) {
 	userID, ok := trackingUserID(c)
 	if !ok {
@@ -82,7 +152,7 @@ func (h *TrackingHandler) Start(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	session, err := h.tracking.StartSession(c.Request.Context(), userID, request.PilotName, request.StartTime)
+	session, err := h.tracking.StartSession(c.Request.Context(), userID, request.PilotName, request.StartTime, request.PubliclyShare)
 	if err != nil {
 		respondTrackingError(c, err)
 		return

@@ -21,6 +21,8 @@ type TrackingRepository interface {
 	StorePoints(ctx context.Context, userID, sessionID uuid.UUID, points []model.LiveTrackPoint) (int64, error)
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
+	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
+	ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
 }
 
 type GormTrackingRepository struct {
@@ -88,6 +90,43 @@ func (r *GormTrackingRepository) StopSession(ctx context.Context, userID, sessio
 		}
 		return tx.Model(&session).Update("ended_at", endedAt).Error
 	})
+}
+
+func (r *GormTrackingRepository) SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error {
+	result := r.db.WithContext(ctx).
+		Model(&model.LiveTrackSession{}).
+		Where("id = ? AND user_id = ? AND ended_at IS NULL", sessionID, userID).
+		Update("publicly_share", enabled)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrTrackingSessionNotFound
+	}
+	return nil
+}
+
+func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error) {
+	locations := make([]model.PublicPilotLocation, 0, limit)
+	query := r.db.WithContext(ctx).
+		Table("live_track_sessions AS s").
+		Select("s.id AS session_id, s.pilot_name, latest.latitude, latest.longitude, latest.heading, latest.timestamp AS observed_at").
+		Joins("JOIN LATERAL (SELECT p.latitude, p.longitude, p.heading, p.timestamp FROM live_track_points p WHERE p.session_id = s.id ORDER BY p.timestamp DESC LIMIT 1) AS latest ON TRUE").
+		Where("s.ended_at IS NULL AND s.publicly_share = ? AND s.user_id <> ?", true, userID).
+		Where("latest.timestamp >= ? AND latest.timestamp <= ?", observedSince, observedUntil).
+		Where("latest.latitude BETWEEN ? AND ?", south, north)
+	if west <= east {
+		query = query.Where("latest.longitude BETWEEN ? AND ?", west, east)
+	} else {
+		query = query.Where("(latest.longitude >= ? OR latest.longitude <= ?)", west, east)
+	}
+	if after != uuid.Nil {
+		query = query.Where("s.id > ?", after)
+	}
+	if err := query.Order("s.id ASC").Limit(limit).Scan(&locations).Error; err != nil {
+		return nil, err
+	}
+	return locations, nil
 }
 
 func (r *GormTrackingRepository) ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error) {

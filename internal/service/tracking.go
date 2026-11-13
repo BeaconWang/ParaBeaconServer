@@ -17,13 +17,19 @@ var (
 	ErrTrackingNotFound    = repository.ErrTrackingSessionNotFound
 )
 
-const MaxTrackingBatchSize = 100
+const (
+	MaxTrackingBatchSize   = 100
+	PublicLocationPageSize = 500
+	PublicLocationMaxAge   = 90 * time.Second
+)
 
 type TrackingRepository interface {
 	CreateSession(ctx context.Context, session *model.LiveTrackSession) error
 	StorePoints(ctx context.Context, userID, sessionID uuid.UUID, points []model.LiveTrackPoint) (int64, error)
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
+	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
+	ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
 }
 
 type TrackingService struct {
@@ -34,16 +40,17 @@ func NewTrackingService(tracking TrackingRepository) *TrackingService {
 	return &TrackingService{tracking: tracking}
 }
 
-func (s *TrackingService) StartSession(ctx context.Context, userID uuid.UUID, pilotName string, startedAt time.Time) (*model.LiveTrackSession, error) {
+func (s *TrackingService) StartSession(ctx context.Context, userID uuid.UUID, pilotName string, startedAt time.Time, publiclyShare bool) (*model.LiveTrackSession, error) {
 	pilotName = strings.TrimSpace(pilotName)
 	if userID == uuid.Nil || pilotName == "" || len([]rune(pilotName)) > 32 || startedAt.IsZero() || startedAt.After(time.Now().UTC().Add(5*time.Minute)) {
 		return nil, ErrInvalidTrackingData
 	}
 	session := &model.LiveTrackSession{
-		ID:        uuid.New(),
-		UserID:    userID,
-		PilotName: pilotName,
-		StartedAt: startedAt.UTC(),
+		ID:            uuid.New(),
+		UserID:        userID,
+		PilotName:     pilotName,
+		StartedAt:     startedAt.UTC(),
+		PubliclyShare: publiclyShare,
 	}
 	if err := s.tracking.CreateSession(ctx, session); err != nil {
 		return nil, err
@@ -72,6 +79,37 @@ func (s *TrackingService) StopSession(ctx context.Context, userID, sessionID uui
 		return ErrInvalidTrackingData
 	}
 	return err
+}
+
+func (s *TrackingService) SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error {
+	if userID == uuid.Nil || sessionID == uuid.Nil {
+		return ErrInvalidTrackingData
+	}
+	return s.tracking.SetPublicSharing(ctx, userID, sessionID, enabled)
+}
+
+func (s *TrackingService) ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error) {
+	if userID == uuid.Nil ||
+		!finiteInRange(south, -90, 90) ||
+		!finiteInRange(north, -90, 90) ||
+		!finiteInRange(west, -180, 180) ||
+		!finiteInRange(east, -180, 180) ||
+		south >= north {
+		return nil, ErrInvalidTrackingData
+	}
+	now := time.Now().UTC()
+	return s.tracking.ListPublicLocations(
+		ctx,
+		userID,
+		south,
+		north,
+		west,
+		east,
+		after,
+		PublicLocationPageSize,
+		now.Add(-PublicLocationMaxAge),
+		now.Add(5*time.Second),
+	)
 }
 
 func (s *TrackingService) ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error) {

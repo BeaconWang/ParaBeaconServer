@@ -79,12 +79,14 @@ Create a session when a flight becomes active:
 
 ```json
 POST /api/v1/tracking/sessions
-{"pilot_name":"sky_rider","start_time":"2026-11-13T10:00:00Z"}
+{"pilot_name":"sky_rider","start_time":"2026-11-13T10:00:00Z","publicly_share":false}
 ```
 
-The `201` response contains a server-generated `session_id`. Upload batches to `POST /api/v1/tracking/sessions/{session_id}/points` with `{"session_id":"…","trackpoints":[...]}`. Each point requires `lat`, `lon`, `altitude` (meters), `speed` (m/s), and an RFC 3339 `timestamp`; optional fields include vertical speed (m/s), GPS/barometric altitude (meters), heading/bearing (degrees), wind (m/s and degrees), GPS accuracy, satellites, pressure (hPa), and temperature (°C). The response reports the number of newly accepted points; duplicate timestamps are safely ignored.
+The `201` response contains a server-generated `session_id`. Public location sharing is opt-in and defaults to `false`; an opted-in active session exposes only the pilot name, latest location, optional heading, and observation time to authenticated map users. The owner can immediately revoke consent with `PATCH /api/v1/tracking/sessions/{session_id}/public-sharing` and `{"publicly_share":false}`. Only locations updated within the last 90 seconds are discoverable.
 
-Stop the session with `POST /api/v1/tracking/sessions/{session_id}/stop` and `{"end_time":"…"}`. Authenticated `GET /api/v1/tracking` lists only the caller's active sessions. Session creation is limited to 10 requests/minute and point batches to 60 requests/minute per client IP.
+Upload batches to `POST /api/v1/tracking/sessions/{session_id}/points` with `{"session_id":"…","trackpoints":[...]}`. Each point requires `lat`, `lon`, `altitude` (meters), `speed` (m/s), and an RFC 3339 `timestamp`; optional fields include vertical speed (m/s), GPS/barometric altitude (meters), heading/bearing (degrees), wind (m/s and degrees), GPS accuracy, satellites, pressure (hPa), and temperature (°C). The response reports the number of newly accepted points; duplicate timestamps are safely ignored.
+
+Fetch public pilot locations within a WGS-84 viewport using authenticated `GET /api/v1/map/active-locations?west=…&south=…&east=…&north=…`. Bounds may cross the antimeridian. Responses are cursor-paged (`locations`, `next_cursor`) so clients can load every matching pilot; results are ordered by session ID and contain no account IDs or private flight telemetry. Stop the session with `POST /api/v1/tracking/sessions/{session_id}/stop` and `{"end_time":"…"}`. Authenticated `GET /api/v1/tracking` lists only the caller's active sessions. Session creation is limited to 10 requests/minute, public-sharing updates to 20, point batches to 60, and map viewport queries to 60 requests/minute per client IP.
 
 Authenticated `GET /api/v1/flight-logs` and `/api/v1/chat` remain reserved and return `501 Not Implemented`; Redis client initialization is available for future modules.
 
