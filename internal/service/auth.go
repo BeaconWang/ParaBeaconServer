@@ -32,7 +32,7 @@ var (
 
 const (
 	MinPasswordCharacters = 6
-	RefreshTokenLifetime  = 30 * 24 * time.Hour
+	RefreshTokenLifetime  = 60 * 24 * time.Hour
 )
 
 type AuthService struct {

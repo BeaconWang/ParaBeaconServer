@@ -54,9 +54,9 @@ Only `username` and `password` are required; `email` may be omitted. Usernames a
 curl.exe -i -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' --data-raw '{"identifier":"sky_rider","password":"A-long-unique-passphrase-2026"}'
 ```
 
-`identifier` accepts the registered username or email address. For older clients, `email` remains accepted instead. The response contains an `access_token` (HS256 JWT), a one-time rotating `refresh_token`, their expiry timestamps, and public user fields. Invalid credentials return a generic `401` response. Configure access-token lifetime with `JWT_EXPIRY` (default `15m`); refresh tokens expire after 30 days and only their SHA-256 hashes are stored server-side.
+`identifier` accepts the registered username or email address. For older clients, `email` remains accepted instead. The response contains an `access_token` (HS256 JWT), a one-time rotating `refresh_token`, their expiry timestamps, and public user fields. Invalid credentials return a generic `401` response. Configure access-token lifetime with `JWT_EXPIRY` (default `15m`); refresh tokens have a rolling 60-day idle lifetime and only their SHA-256 hashes are stored server-side.
 
-When the access token is close to expiry, exchange the refresh token at `POST /api/v1/auth/refresh` with `{"refresh_token":"…"}`. The response returns a new access token and a rotated refresh token; the previous refresh token is immediately invalidated. Store both tokens securely and never log or expose the refresh token. On sign-out, send the current refresh token to `POST /api/v1/auth/logout` to revoke it.
+When the access token is close to expiry, exchange the refresh token at `POST /api/v1/auth/refresh` with `{"refresh_token":"…"}`. A successful refresh within 60 days returns a new access token and a rotated refresh token with a new 60-day expiry; the previous refresh token is immediately invalidated. The session expires if its current refresh token is unused for more than 60 days. Store both tokens securely and never log or expose the refresh token. On sign-out, send the current refresh token to `POST /api/v1/auth/logout` to revoke it.
 
 ### Authenticated profile
 
