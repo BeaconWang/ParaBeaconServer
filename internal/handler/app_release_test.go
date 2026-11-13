@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,11 +18,13 @@ import (
 )
 
 type appReleaseHandlerTestService struct {
-	release *model.AppRelease
-	path    string
-	name    string
-	code    int64
-	bytes   string
+	release       *model.AppRelease
+	path          string
+	name          string
+	code          int64
+	notes         string
+	bytes         string
+	downloadCount int
 }
 
 func (s *appReleaseHandlerTestService) ListPublished(context.Context) ([]model.AppRelease, error) {
@@ -34,13 +38,18 @@ func (s *appReleaseHandlerTestService) Latest(context.Context) (*model.AppReleas
 	return s.release, nil
 }
 
-func (s *appReleaseHandlerTestService) Publish(_ context.Context, versionName string, versionCode int64, source io.Reader) (*model.AppRelease, error) {
+func (s *appReleaseHandlerTestService) Publish(_ context.Context, versionName string, versionCode int64, notes string, source io.Reader) (*model.AppRelease, error) {
 	content, err := io.ReadAll(source)
 	if err != nil {
 		return nil, err
 	}
-	s.name, s.code, s.bytes = versionName, versionCode, string(content)
+	s.name, s.code, s.notes, s.bytes = versionName, versionCode, notes, string(content)
 	return s.release, nil
+}
+
+func (s *appReleaseHandlerTestService) RecordDownload(context.Context, int64) error {
+	s.downloadCount++
+	return nil
 }
 
 func (s *appReleaseHandlerTestService) Delete(context.Context, int64) error {
@@ -132,12 +141,16 @@ func TestDownloadAppReleaseUsesAttachmentAndAPKContentType(t *testing.T) {
 		t.Fatal(err)
 	}
 	release := &model.AppRelease{VersionName: "1.2.3", VersionCode: 123, SHA256: strings.Repeat("b", 64)}
+	service := &appReleaseHandlerTestService{release: release, path: file}
 	engine := gin.New()
-	engine.GET("/api/v1/app/releases/:version_code/download", NewAppReleaseHandler(&appReleaseHandlerTestService{release: release, path: file}).Download)
+	engine.GET("/api/v1/app/releases/:version_code/download", NewAppReleaseHandler(service).Download)
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/app/releases/123/download", nil))
 	if response.Code != http.StatusOK || response.Body.String() != "apk-test" {
 		t.Fatalf("download status=%d body=%q", response.Code, response.Body.String())
+	}
+	if service.downloadCount != 1 {
+		t.Fatalf("download count = %d, want 1", service.downloadCount)
 	}
 	if response.Header().Get("Cache-Control") != "no-store, no-cache, must-revalidate" || response.Header().Get("Pragma") != "no-cache" || response.Header().Get("Expires") != "0" {
 		t.Fatalf("download cache headers = Cache-Control:%q Pragma:%q Expires:%q", response.Header().Get("Cache-Control"), response.Header().Get("Pragma"), response.Header().Get("Expires"))
@@ -170,6 +183,44 @@ func TestPublishAppReleaseReadsVersionHeadersAndAPKBody(t *testing.T) {
 	}
 	if service.name != "1.2.3" || service.code != 123 || service.bytes != "test-apk" {
 		t.Fatalf("published release = %q / %d / %q", service.name, service.code, service.bytes)
+	}
+}
+
+func TestPublishAppReleaseAcceptsMultipartNotes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &appReleaseHandlerTestService{release: &model.AppRelease{VersionName: "1.2.3", VersionCode: 123}}
+	engine := gin.New()
+	engine.POST("/api/v1/admin/app/releases", NewAppReleaseHandler(service).Publish)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("version_name", "1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("version_code", "123"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("notes", "## What's new\\n- Faster launch"); err != nil {
+		t.Fatal(err)
+	}
+	file, err := writer.CreateFormFile("apk", "app-release.apk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("test-apk")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/admin/app/releases", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
+	}
+	if service.name != "1.2.3" || service.code != 123 || service.notes != "## What's new\\n- Faster launch" || service.bytes != "test-apk" {
+		t.Fatalf("published multipart release = %#v / %d / %q / %q", service.name, service.code, service.notes, service.bytes)
 	}
 }
 

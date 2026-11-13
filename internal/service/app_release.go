@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/model"
@@ -20,6 +21,7 @@ import (
 )
 
 const MaxAPKSizeBytes int64 = 512 << 20
+const MaxReleaseNotesBytes = 64 << 10
 
 var (
 	ErrInvalidAppRelease = errors.New("invalid app release")
@@ -34,6 +36,7 @@ type AppReleaseRepository interface {
 	ListPublished(ctx context.Context, packageName string) ([]model.AppRelease, error)
 	Latest(ctx context.Context, packageName string) (*model.AppRelease, error)
 	FindPublished(ctx context.Context, packageName string, versionCode int64) (*model.AppRelease, error)
+	IncrementDownloadCount(ctx context.Context, packageName string, versionCode int64) error
 	Delete(ctx context.Context, packageName string, versionCode int64) error
 }
 
@@ -64,9 +67,17 @@ func (s *AppReleaseService) Latest(ctx context.Context) (*model.AppRelease, erro
 	return s.releases.Latest(ctx, s.packageName)
 }
 
-func (s *AppReleaseService) Publish(ctx context.Context, versionName string, versionCode int64, source io.Reader) (*model.AppRelease, error) {
+func (s *AppReleaseService) RecordDownload(ctx context.Context, versionCode int64) error {
+	if versionCode < 1 || versionCode > 2100000000 {
+		return ErrInvalidAppRelease
+	}
+	return s.releases.IncrementDownloadCount(ctx, s.packageName, versionCode)
+}
+
+func (s *AppReleaseService) Publish(ctx context.Context, versionName string, versionCode int64, notes string, source io.Reader) (*model.AppRelease, error) {
 	versionName = strings.TrimSpace(versionName)
-	if !versionNamePattern.MatchString(versionName) || versionCode < 1 || versionCode > 2100000000 || source == nil {
+	notes = strings.TrimSpace(notes)
+	if !versionNamePattern.MatchString(versionName) || versionCode < 1 || versionCode > 2100000000 || len(notes) > MaxReleaseNotesBytes || !utf8.ValidString(notes) || source == nil {
 		return nil, ErrInvalidAppRelease
 	}
 	if err := os.MkdirAll(s.storageRoot, 0700); err != nil {
@@ -111,6 +122,7 @@ func (s *AppReleaseService) Publish(ctx context.Context, versionName string, ver
 		StorageKey:  storageKey,
 		SHA256:      hex.EncodeToString(hasher.Sum(nil)),
 		SizeBytes:   size,
+		Notes:       notes,
 		PublishedAt: &now,
 	}
 	if err := s.releases.Create(ctx, release); err != nil {

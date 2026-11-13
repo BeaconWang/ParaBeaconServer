@@ -92,7 +92,7 @@ Authenticated `GET /api/v1/flight-logs` and `/api/v1/chat` remain reserved and r
 
 ## Android APK releases
 
-APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./data/apks`) and indexed in the `app_releases` table by Android `versionCode`. Mount that directory on persistent storage in production. Set `APK_PACKAGE_NAME` to the Android application ID. Public clients can query `GET /api/v1/app/releases/latest` for the newest build or `GET /api/v1/app/releases` for every published version. Every published version is publicly downloadable through its `download_url` at `GET /api/v1/app/releases/{version_code}/download`; downloads are served as APK attachments and include a SHA-256 digest and byte size for client verification. The `/release` page, release metadata APIs, and APK downloads all send no-store cache headers so clients request current server data.
+APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./data/apks`) and indexed in the `app_releases` table by Android `versionCode`. Mount that directory on persistent storage in production. Set `APK_PACKAGE_NAME` to the Android application ID. Public clients can query `GET /api/v1/app/releases/latest` for the newest build or `GET /api/v1/app/releases` for every published version. Every published version is publicly downloadable through its `download_url` at `GET /api/v1/app/releases/{version_code}/download`; downloads are served as APK attachments and include a SHA-256 digest, byte size, and an atomic download count for client verification and statistics. The `/release` page, release metadata APIs, and APK downloads all send no-store cache headers so clients request current server data.
 
 Publishing is disabled unless `APK_RELEASE_ADMIN_TOKEN` contains a secret of at least 32 characters. Keep it in a secret manager; never include it in the app. Upload a signed APK directly as the request body:
 
@@ -105,7 +105,7 @@ curl -X POST http://localhost:8080/api/v1/admin/app/releases \
   --data-binary @build/app/outputs/flutter-apk/app-release.apk
 ```
 
-The server limits uploads to 512 MiB, verifies the APK archive contains `AndroidManifest.xml`, records its digest and generated storage key, and refuses duplicate version codes. Android verifies the APK signing certificate when the user installs it; every release must be signed with the same production signing key and use a strictly increasing `versionCode`. The server uses a ten-minute HTTP body/read timeout to support APK transfer; keep equivalent or longer proxy timeouts at the ingress.
+The server limits uploads to 512 MiB, verifies the APK archive contains `AndroidManifest.xml`, records its digest, generated storage key, Markdown release notes, and download count, and refuses duplicate version codes. The web console sends `multipart/form-data` with `version_name`, `version_code`, `notes`, and `apk`; the raw binary header-based upload remains supported for API clients. Android verifies the APK signing certificate when the user installs it; every release must be signed with the same production signing key and use a strictly increasing `versionCode`. The server uses a ten-minute HTTP body/read timeout to support APK transfer; keep equivalent or longer proxy timeouts at the ingress.
 
 ### Release management web UI
 

@@ -59,6 +59,15 @@ func (r *memoryAppReleaseRepository) Latest(_ context.Context, packageName strin
 	return latest, nil
 }
 
+func (r *memoryAppReleaseRepository) IncrementDownloadCount(_ context.Context, packageName string, versionCode int64) error {
+	release := r.releases[versionCode]
+	if release == nil || release.PackageName != packageName || release.PublishedAt == nil {
+		return repository.ErrAppReleaseNotFound
+	}
+	release.DownloadCount++
+	return nil
+}
+
 func (r *memoryAppReleaseRepository) Delete(_ context.Context, packageName string, versionCode int64) error {
 	release := r.releases[versionCode]
 	if release == nil || release.PackageName != packageName || release.PublishedAt == nil {
@@ -102,7 +111,7 @@ func TestAppReleasePublishStoresAPKAndLatestMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	apk := makeTestAPK(t)
-	release, err := service.Publish(ctx, "1.2.3", 123, bytes.NewReader(apk))
+	release, err := service.Publish(ctx, "1.2.3", 123, "## What's new\n- Faster launch", bytes.NewReader(apk))
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -111,6 +120,15 @@ func TestAppReleasePublishStoresAPKAndLatestMetadata(t *testing.T) {
 	}
 	if release.SizeBytes != int64(len(apk)) {
 		t.Fatalf("APK size = %d, want %d", release.SizeBytes, len(apk))
+	}
+	if release.Notes != "## What's new\n- Faster launch" || release.DownloadCount != 0 {
+		t.Fatalf("release notes/count = %q/%d", release.Notes, release.DownloadCount)
+	}
+	if err := service.RecordDownload(ctx, release.VersionCode); err != nil {
+		t.Fatal(err)
+	}
+	if release.DownloadCount != 1 {
+		t.Fatalf("download count = %d, want 1", release.DownloadCount)
 	}
 	digest := sha256.Sum256(apk)
 	if release.SHA256 != hex.EncodeToString(digest[:]) {
@@ -146,7 +164,7 @@ func TestAppReleaseDeleteRemovesMetadataAndAPK(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	release, err := service.Publish(context.Background(), "1.2.3", 123, bytes.NewReader(makeTestAPK(t)))
+	release, err := service.Publish(context.Background(), "1.2.3", 123, "", bytes.NewReader(makeTestAPK(t)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +206,7 @@ func TestAppReleasePublishRejectsInvalidAPKAndMetadata(t *testing.T) {
 		{name: "not apk", versionName: "1.0.0", versionCode: 1, apk: []byte("not an APK"), want: ErrInvalidAPK},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := service.Publish(context.Background(), test.versionName, test.versionCode, bytes.NewReader(test.apk))
+			_, err := service.Publish(context.Background(), test.versionName, test.versionCode, "", bytes.NewReader(test.apk))
 			if !errors.Is(err, test.want) {
 				t.Fatalf("Publish() error = %v, want %v", err, test.want)
 			}

@@ -19,7 +19,8 @@ import (
 type AppReleaseService interface {
 	ListPublished(ctx context.Context) ([]model.AppRelease, error)
 	Latest(ctx context.Context) (*model.AppRelease, error)
-	Publish(ctx context.Context, versionName string, versionCode int64, source io.Reader) (*model.AppRelease, error)
+	RecordDownload(ctx context.Context, versionCode int64) error
+	Publish(ctx context.Context, versionName string, versionCode int64, notes string, source io.Reader) (*model.AppRelease, error)
 	Delete(ctx context.Context, versionCode int64) error
 	FindPublished(ctx context.Context, versionCode int64) (*model.AppRelease, string, error)
 }
@@ -39,13 +40,15 @@ func setNoStoreHeaders(c *gin.Context) {
 }
 
 type latestReleaseResponse struct {
-	VersionName string     `json:"version_name"`
-	VersionCode int64      `json:"version_code"`
-	PackageName string     `json:"package_name"`
-	SizeBytes   int64      `json:"size_bytes"`
-	SHA256      string     `json:"sha256"`
-	PublishedAt *time.Time `json:"published_at,omitempty"`
-	DownloadURL string     `json:"download_url"`
+	VersionName   string     `json:"version_name"`
+	VersionCode   int64      `json:"version_code"`
+	PackageName   string     `json:"package_name"`
+	SizeBytes     int64      `json:"size_bytes"`
+	DownloadCount int64      `json:"download_count"`
+	Notes         string     `json:"notes"`
+	SHA256        string     `json:"sha256"`
+	PublishedAt   *time.Time `json:"published_at,omitempty"`
+	DownloadURL   string     `json:"download_url"`
 }
 
 func (h *AppReleaseHandler) List(c *gin.Context) {
@@ -57,13 +60,15 @@ func (h *AppReleaseHandler) List(c *gin.Context) {
 	response := make([]latestReleaseResponse, 0, len(releases))
 	for _, release := range releases {
 		response = append(response, latestReleaseResponse{
-			VersionName: release.VersionName,
-			VersionCode: release.VersionCode,
-			PackageName: release.PackageName,
-			SizeBytes:   release.SizeBytes,
-			SHA256:      release.SHA256,
-			PublishedAt: release.PublishedAt,
-			DownloadURL: fmt.Sprintf("/api/v1/app/releases/%d/download", release.VersionCode),
+			VersionName:   release.VersionName,
+			VersionCode:   release.VersionCode,
+			PackageName:   release.PackageName,
+			SizeBytes:     release.SizeBytes,
+			DownloadCount: release.DownloadCount,
+			Notes:         release.Notes,
+			SHA256:        release.SHA256,
+			PublishedAt:   release.PublishedAt,
+			DownloadURL:   fmt.Sprintf("/api/v1/app/releases/%d/download", release.VersionCode),
 		})
 	}
 	setNoStoreHeaders(c)
@@ -82,13 +87,15 @@ func (h *AppReleaseHandler) Latest(c *gin.Context) {
 	}
 	setNoStoreHeaders(c)
 	c.JSON(http.StatusOK, latestReleaseResponse{
-		VersionName: release.VersionName,
-		VersionCode: release.VersionCode,
-		PackageName: release.PackageName,
-		SizeBytes:   release.SizeBytes,
-		SHA256:      release.SHA256,
-		PublishedAt: release.PublishedAt,
-		DownloadURL: fmt.Sprintf("/api/v1/app/releases/%d/download", release.VersionCode),
+		VersionName:   release.VersionName,
+		VersionCode:   release.VersionCode,
+		PackageName:   release.PackageName,
+		SizeBytes:     release.SizeBytes,
+		DownloadCount: release.DownloadCount,
+		Notes:         release.Notes,
+		SHA256:        release.SHA256,
+		PublishedAt:   release.PublishedAt,
+		DownloadURL:   fmt.Sprintf("/api/v1/app/releases/%d/download", release.VersionCode),
 	})
 }
 
@@ -100,6 +107,14 @@ func (h *AppReleaseHandler) Download(c *gin.Context) {
 	}
 	release, path, err := h.releases.FindPublished(c.Request.Context(), versionCode)
 	if err != nil {
+		if service.IsAppReleaseNotFound(err) {
+			respondError(c, http.StatusNotFound, "app release not found")
+			return
+		}
+		respondInternalError(c)
+		return
+	}
+	if err := h.releases.RecordDownload(c.Request.Context(), versionCode); err != nil {
 		if service.IsAppReleaseNotFound(err) {
 			respondError(c, http.StatusNotFound, "app release not found")
 			return
@@ -133,23 +148,67 @@ func (h *AppReleaseHandler) Delete(c *gin.Context) {
 }
 
 func (h *AppReleaseHandler) Publish(c *gin.Context) {
-	versionName := strings.TrimSpace(c.GetHeader("X-APK-Version"))
-	versionCode, err := strconv.ParseInt(c.GetHeader("X-APK-Version-Code"), 10, 64)
-	if err != nil {
-		respondError(c, http.StatusBadRequest, "invalid APK version code")
-		return
-	}
 	contentType := strings.ToLower(strings.TrimSpace(strings.Split(c.GetHeader("Content-Type"), ";")[0]))
-	if contentType != "application/vnd.android.package-archive" && contentType != "application/octet-stream" {
+	var (
+		versionName string
+		versionCode int64
+		notes       string
+		err         error
+		source      io.Reader
+		cleanup     func()
+	)
+	if contentType == "multipart/form-data" {
+		if c.Request.ContentLength > service.MaxAPKSizeBytes+(1<<20) {
+			respondError(c, http.StatusRequestEntityTooLarge, "APK exceeds upload limit")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxAPKSizeBytes+(1<<20))
+		if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid multipart release")
+			return
+		}
+		file, _, err := c.Request.FormFile("apk")
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "APK file is required")
+			return
+		}
+		source = file
+		cleanup = func() {
+			file.Close()
+			if c.Request.MultipartForm != nil {
+				c.Request.MultipartForm.RemoveAll()
+			}
+		}
+		versionName = strings.TrimSpace(c.PostForm("version_name"))
+		versionCode, err = strconv.ParseInt(c.PostForm("version_code"), 10, 64)
+		if err != nil {
+			cleanup()
+			respondError(c, http.StatusBadRequest, "invalid APK version code")
+			return
+		}
+		notes = c.PostForm("notes")
+	} else if contentType == "application/vnd.android.package-archive" || contentType == "application/octet-stream" {
+		versionName = strings.TrimSpace(c.GetHeader("X-APK-Version"))
+		versionCode, err = strconv.ParseInt(c.GetHeader("X-APK-Version-Code"), 10, 64)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid APK version code")
+			return
+		}
+		notes = c.GetHeader("X-APK-Notes")
+		if c.Request.ContentLength > service.MaxAPKSizeBytes {
+			respondError(c, http.StatusRequestEntityTooLarge, "APK exceeds upload limit")
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxAPKSizeBytes+1)
+		source = c.Request.Body
+	} else {
 		respondError(c, http.StatusUnsupportedMediaType, "APK content type required")
 		return
 	}
-	if c.Request.ContentLength > service.MaxAPKSizeBytes {
-		respondError(c, http.StatusRequestEntityTooLarge, "APK exceeds upload limit")
-		return
+	if cleanup != nil {
+		defer cleanup()
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxAPKSizeBytes+1)
-	release, err := h.releases.Publish(c.Request.Context(), versionName, versionCode, c.Request.Body)
+	release, err := h.releases.Publish(c.Request.Context(), versionName, versionCode, notes, source)
 	if err != nil {
 		var maxBytesError *http.MaxBytesError
 		if errors.As(err, &maxBytesError) {
@@ -168,13 +227,16 @@ func (h *AppReleaseHandler) Publish(c *gin.Context) {
 		}
 		return
 	}
+	setNoStoreHeaders(c)
 	c.JSON(http.StatusCreated, latestReleaseResponse{
-		VersionName: release.VersionName,
-		VersionCode: release.VersionCode,
-		PackageName: release.PackageName,
-		SizeBytes:   release.SizeBytes,
-		SHA256:      release.SHA256,
-		PublishedAt: release.PublishedAt,
-		DownloadURL: fmt.Sprintf("/api/v1/app/releases/%d/download", release.VersionCode),
+		VersionName:   release.VersionName,
+		VersionCode:   release.VersionCode,
+		PackageName:   release.PackageName,
+		SizeBytes:     release.SizeBytes,
+		DownloadCount: release.DownloadCount,
+		Notes:         release.Notes,
+		SHA256:        release.SHA256,
+		PublishedAt:   release.PublishedAt,
+		DownloadURL:   fmt.Sprintf("/api/v1/app/releases/%d/download", release.VersionCode),
 	})
 }
