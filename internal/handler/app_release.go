@@ -32,6 +32,12 @@ func NewAppReleaseHandler(releases AppReleaseService) *AppReleaseHandler {
 	return &AppReleaseHandler{releases: releases}
 }
 
+func setNoStoreHeaders(c *gin.Context) {
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
+}
+
 type latestReleaseResponse struct {
 	VersionName string     `json:"version_name"`
 	VersionCode int64      `json:"version_code"`
@@ -60,8 +66,7 @@ func (h *AppReleaseHandler) List(c *gin.Context) {
 			DownloadURL: fmt.Sprintf("/api/v1/app/releases/%d/download", release.VersionCode),
 		})
 	}
-	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
-	c.Header("Pragma", "no-cache")
+	setNoStoreHeaders(c)
 	c.JSON(http.StatusOK, gin.H{"releases": response})
 }
 
@@ -75,7 +80,7 @@ func (h *AppReleaseHandler) Latest(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.Header("Cache-Control", "public, max-age=300")
+	setNoStoreHeaders(c)
 	c.JSON(http.StatusOK, latestReleaseResponse{
 		VersionName: release.VersionName,
 		VersionCode: release.VersionCode,
@@ -102,9 +107,8 @@ func (h *AppReleaseHandler) Download(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	setNoStoreHeaders(c)
 	c.Header("Content-Type", "application/vnd.android.package-archive")
-	c.Header("ETag", `"`+release.SHA256+`"`)
 	c.FileAttachment(path, fmt.Sprintf("parabeacon-%s.apk", release.VersionName))
 }
 

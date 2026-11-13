@@ -67,6 +67,15 @@ func TestLatestAppReleaseReturnsDownloadMetadata(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", response.Code, response.Body.String())
 	}
+	if got := response.Header().Get("Cache-Control"); got != "no-store, no-cache, must-revalidate" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := response.Header().Get("Pragma"); got != "no-cache" {
+		t.Fatalf("Pragma = %q", got)
+	}
+	if got := response.Header().Get("Expires"); got != "0" {
+		t.Fatalf("Expires = %q", got)
+	}
 	for _, value := range []string{`"version_name":"1.2.3"`, `"version_code":123`, `"sha256":"` + strings.Repeat("a", 64) + `"`, `"download_url":"/api/v1/app/releases/123/download"`} {
 		if !strings.Contains(response.Body.String(), value) {
 			t.Errorf("response missing %s: %s", value, response.Body.String())
@@ -129,6 +138,12 @@ func TestDownloadAppReleaseUsesAttachmentAndAPKContentType(t *testing.T) {
 	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/app/releases/123/download", nil))
 	if response.Code != http.StatusOK || response.Body.String() != "apk-test" {
 		t.Fatalf("download status=%d body=%q", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store, no-cache, must-revalidate" || response.Header().Get("Pragma") != "no-cache" || response.Header().Get("Expires") != "0" {
+		t.Fatalf("download cache headers = Cache-Control:%q Pragma:%q Expires:%q", response.Header().Get("Cache-Control"), response.Header().Get("Pragma"), response.Header().Get("Expires"))
+	}
+	if response.Header().Get("ETag") != "" {
+		t.Fatalf("download unexpectedly has ETag = %q", response.Header().Get("ETag"))
 	}
 	if response.Header().Get("Content-Type") != "application/vnd.android.package-archive" {
 		t.Fatalf("Content-Type = %q", response.Header().Get("Content-Type"))
