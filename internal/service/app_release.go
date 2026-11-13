@@ -152,18 +152,19 @@ func (s *AppReleaseService) Delete(ctx context.Context, versionCode int64) error
 	if err := os.Rename(path, tombstone); err != nil {
 		return fmt.Errorf("stage APK deletion: %w", err)
 	}
-	deleted := false
-	defer func() {
-		if !deleted {
-			_ = os.Rename(tombstone, path)
-		}
-	}()
 	if err := s.releases.Delete(ctx, s.packageName, release.VersionCode); err != nil {
+		if restoreErr := os.Rename(tombstone, path); restoreErr != nil {
+			return fmt.Errorf("delete app release: %w (restore APK: %v)", err, restoreErr)
+		}
 		return err
 	}
-	deleted = true
 	if err := os.Remove(tombstone); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove deleted APK: %w", err)
+		restoreDBErr := s.releases.Create(ctx, release)
+		restoreFileErr := os.Rename(tombstone, path)
+		if restoreDBErr != nil || restoreFileErr != nil {
+			return fmt.Errorf("remove APK: %w (restore metadata: %v; restore APK: %v)", err, restoreDBErr, restoreFileErr)
+		}
+		return fmt.Errorf("remove APK: %w", err)
 	}
 	return nil
 }

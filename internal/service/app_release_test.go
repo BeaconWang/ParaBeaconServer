@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -155,6 +156,15 @@ func TestAppReleaseDeleteRemovesMetadataAndAPK(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("APK still exists, error = %v", err)
+	}
+	entries, err := os.ReadDir(storageRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".delete-") {
+			t.Fatalf("delete tombstone remains: %s", entry.Name())
+		}
 	}
 	if _, _, err := service.FindPublished(context.Background(), release.VersionCode); !errors.Is(err, repository.ErrAppReleaseNotFound) {
 		t.Fatalf("FindPublished() error = %v, want not found", err)

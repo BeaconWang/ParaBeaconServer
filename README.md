@@ -109,7 +109,7 @@ The server limits uploads to 512 MiB, verifies the APK archive contains `Android
 
 ### Release management web UI
 
-Open `/release` to use the embedded release management console. Enter the `APK_RELEASE_ADMIN_TOKEN` when publishing or deleting releases; the page keeps it in memory and does not write it to browser storage. The console supports signed APK upload, public release history, SHA-256 inspection, downloads, multi-select deletion, and English/Chinese language switching. APK contents are immutable after publishing, while an administrator may remove a release. Deleting a release removes its public metadata and APK file; the admin-only endpoint is `DELETE /api/v1/admin/app/releases/{version_code}`.
+Open `/release` to use the embedded release management console. Enter the `APK_RELEASE_ADMIN_TOKEN` when publishing or deleting releases; the page keeps it in memory and does not write it to browser storage. The console supports signed APK upload, public release history, SHA-256 inspection, downloads, multi-select deletion, and English/Chinese language switching. APK contents are immutable after publishing, while an administrator may remove a release. Deleting a release permanently unlinks its APK file from server storage and removes its public metadata; the admin-only endpoint is `DELETE /api/v1/admin/app/releases/{version_code}`. The API reports an error rather than treating a failed file removal as a successful deletion.
 
 ## Tests and build
 
