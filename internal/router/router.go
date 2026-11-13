@@ -30,7 +30,12 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	if err != nil {
 		return nil, err
 	}
-	engine.GET("/", gin.WrapH(webapp.Handler()))
+	releasePage := gin.WrapH(http.StripPrefix("/release", webapp.Handler()))
+	engine.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/release")
+	})
+	engine.GET("/release", releasePage)
+	engine.GET("/release/", releasePage)
 	engine.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -67,6 +72,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		auth.POST("/refresh", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), authHandler.Refresh)
 		auth.POST("/logout", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), authHandler.Logout)
 
+		v1.GET("/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), appReleaseHandler.List)
 		v1.GET("/app/releases/latest", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), appReleaseHandler.Latest)
 		v1.GET("/app/releases/:version_code/download", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), appReleaseHandler.Download)
 		v1.GET("/admin/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.List)

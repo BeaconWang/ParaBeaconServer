@@ -92,7 +92,7 @@ Authenticated `GET /api/v1/flight-logs` and `/api/v1/chat` remain reserved and r
 
 ## Android APK releases
 
-APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./data/apks`) and indexed in the `app_releases` table by Android `versionCode`. Mount that directory on persistent storage in production. Set `APK_PACKAGE_NAME` to the Android application ID. Public clients can query `GET /api/v1/app/releases/latest` and download the returned `download_url`; downloads are served as APK attachments and include a SHA-256 digest and byte size for client verification.
+APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./data/apks`) and indexed in the `app_releases` table by Android `versionCode`. Mount that directory on persistent storage in production. Set `APK_PACKAGE_NAME` to the Android application ID. Public clients can query `GET /api/v1/app/releases/latest` for the newest build or `GET /api/v1/app/releases` for every published version. Every published version is publicly downloadable through its `download_url` at `GET /api/v1/app/releases/{version_code}/download`; downloads are served as APK attachments and include a SHA-256 digest and byte size for client verification.
 
 Publishing is disabled unless `APK_RELEASE_ADMIN_TOKEN` contains a secret of at least 32 characters. Keep it in a secret manager; never include it in the app. Upload a signed APK directly as the request body:
 
@@ -109,7 +109,7 @@ The server limits uploads to 512 MiB, verifies the APK archive contains `Android
 
 ### Release management web UI
 
-Open the server root URL (`/`) to use the embedded release management console. Enter the `APK_RELEASE_ADMIN_TOKEN` only when publishing or viewing the protected release history; the page keeps it in memory and does not write it to browser storage. The console supports signed APK upload, version metadata, release history, SHA-256 inspection, and downloads. Published releases are immutable, and the public latest-release API remains available to app clients.
+Open `/release` to use the embedded release management console. Enter the `APK_RELEASE_ADMIN_TOKEN` only when publishing; the page keeps it in memory and does not write it to browser storage. The console supports signed APK upload, public release history, SHA-256 inspection, and downloads. Published releases are immutable, and every published APK version can be downloaded without authentication.
 
 ## Tests and build
 
