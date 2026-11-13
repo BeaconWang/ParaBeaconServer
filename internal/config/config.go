@@ -28,6 +28,12 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("load .env file: %w", err)
 	}
 
+	environment := env("APP_ENV", "development")
+	databaseDSN := strings.TrimSpace(os.Getenv("DATABASE_DSN"))
+	if databaseDSN == "" && (environment == "development" || environment == "test") {
+		databaseDSN = "postgres://parabeacon:parabeacon-dev@localhost:5432/parabeacon?sslmode=disable"
+	}
+
 	port := env("HTTP_PORT", "8080")
 	portNumber, err := strconv.Atoi(port)
 	if err != nil || portNumber < 1 || portNumber > 65535 {
@@ -40,9 +46,9 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Environment:       env("APP_ENV", "development"),
+		Environment:       environment,
 		HTTPAddress:       ":" + port,
-		DatabaseDSN:       strings.TrimSpace(os.Getenv("DATABASE_DSN")),
+		DatabaseDSN:       databaseDSN,
 		RedisURL:          strings.TrimSpace(os.Getenv("REDIS_URL")),
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 		JWTIssuer:         env("JWT_ISSUER", "parabeacon-api"),
