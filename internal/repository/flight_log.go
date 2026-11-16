@@ -21,6 +21,9 @@ type FlightLogRepository interface {
 	Replace(ctx context.Context, userID uuid.UUID, logs []model.FlightLog) error
 	BeginSync(ctx context.Context, syncSession *model.FlightLogSync) error
 	StageSyncBatch(ctx context.Context, userID, syncID uuid.UUID, batchIndex int, payloadHash string, logs []model.FlightLog, batchBytes int64, now time.Time) error
+	StageSyncArchive(ctx context.Context, userID, syncID uuid.UUID, batchIndex int, payloadHash string, log *model.FlightLogSyncRecord, archiveBytes int64, now time.Time) (uuid.UUID, error)
+	SyncArchivePlan(ctx context.Context, userID, syncID uuid.UUID, now time.Time) ([]model.FlightLogSyncRecord, int, bool, error)
+	CommitSyncArchives(ctx context.Context, userID, syncID uuid.UUID, now time.Time) (int, []uuid.UUID, error)
 	CommitSync(ctx context.Context, userID, syncID uuid.UUID, now time.Time) (int, error)
 	List(ctx context.Context, userID, after uuid.UUID, limit int) ([]model.FlightLog, bool, error)
 }
@@ -115,7 +118,7 @@ func replaceFlightLogsTx(tx *gorm.DB, userID uuid.UUID, logs []model.FlightLog) 
 	}
 	return tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}, {Name: "started_at"}, {Name: "point_count"}},
-		DoUpdates: clause.AssignmentColumns([]string{"data"}),
+		DoUpdates: clause.AssignmentColumns([]string{"data", "archive_id"}),
 	}).CreateInBatches(&logs, 100).Error
 }
 
@@ -163,7 +166,7 @@ func (r *GormFlightLogRepository) StageSyncBatch(ctx context.Context, userID, sy
 			}
 			return err
 		}
-		if syncSession.CommittedAt != nil {
+		if syncSession.CommittedAt != nil || syncSession.ArchiveMode {
 			return ErrFlightLogSyncConflict
 		}
 
@@ -223,6 +226,165 @@ func (r *GormFlightLogRepository) StageSyncBatch(ctx context.Context, userID, sy
 	})
 }
 
+func (r *GormFlightLogRepository) StageSyncArchive(ctx context.Context, userID, syncID uuid.UUID, flightIndex int, payloadHash string, record *model.FlightLogSyncRecord, archiveBytes int64, now time.Time) (uuid.UUID, error) {
+	if flightIndex < 0 || record == nil || record.ArchiveID == nil || archiveBytes <= 0 || archiveBytes > 24<<20 {
+		return uuid.Nil, ErrFlightLogSyncConflict
+	}
+	var storedArchiveID uuid.UUID
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockFlightLogOwner(tx, userID); err != nil {
+			return err
+		}
+		var session model.FlightLogSync
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND expires_at > ?", syncID, userID, now).
+			First(&session).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrFlightLogSyncNotFound
+			}
+			return err
+		}
+		if session.CommittedAt != nil || (!session.ArchiveMode && session.NextBatchIndex > 0) {
+			return ErrFlightLogSyncConflict
+		}
+		var previous model.FlightLogSyncBatch
+		err := tx.Where("sync_id = ? AND user_id = ? AND batch_index = ?", syncID, userID, flightIndex).First(&previous).Error
+		if err == nil {
+			if previous.PayloadHash != payloadHash || previous.RecordCount != 1 {
+				return ErrFlightLogSyncConflict
+			}
+			var prior model.FlightLogSyncRecord
+			if err := tx.Where("sync_id = ? AND user_id = ? AND batch_index = ? AND record_index = 0", syncID, userID, flightIndex).First(&prior).Error; err != nil {
+				return err
+			}
+			if prior.ArchiveID == nil {
+				return ErrFlightLogSyncConflict
+			}
+			storedArchiveID = *prior.ArchiveID
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if flightIndex != session.NextBatchIndex || session.StagedCount >= session.ExpectedCount || session.StagedBytes+archiveBytes > 512<<20 {
+			return ErrFlightLogSyncConflict
+		}
+		batch := model.FlightLogSyncBatch{SyncID: syncID, UserID: userID, BatchIndex: flightIndex, PayloadHash: payloadHash, RecordCount: 1}
+		if err := tx.Create(&batch).Error; err != nil {
+			return err
+		}
+		record.SyncID = syncID
+		record.UserID = userID
+		record.BatchIndex = flightIndex
+		record.RecordIndex = 0
+		if record.StagedID == uuid.Nil {
+			record.StagedID = uuid.New()
+		}
+		if err := tx.Create(record).Error; err != nil {
+			if errors.Is(err, gorm.ErrDuplicatedKey) {
+				return ErrFlightLogSyncConflict
+			}
+			return err
+		}
+		session.StagedCount++
+		session.StagedBytes += archiveBytes
+		session.NextBatchIndex++
+		session.ArchiveMode = true
+		if err := tx.Model(&session).Updates(map[string]any{
+			"staged_count":     session.StagedCount,
+			"staged_bytes":     session.StagedBytes,
+			"next_batch_index": session.NextBatchIndex,
+			"archive_mode":     true,
+		}).Error; err != nil {
+			return err
+		}
+		storedArchiveID = *record.ArchiveID
+		return nil
+	})
+	return storedArchiveID, err
+}
+
+func (r *GormFlightLogRepository) SyncArchivePlan(ctx context.Context, userID, syncID uuid.UUID, now time.Time) ([]model.FlightLogSyncRecord, int, bool, error) {
+	var session model.FlightLogSync
+	if err := r.db.WithContext(ctx).
+		Where("id = ? AND user_id = ? AND expires_at > ?", syncID, userID, now).
+		First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, 0, false, ErrFlightLogSyncNotFound
+		}
+		return nil, 0, false, err
+	}
+	if session.CommittedAt != nil {
+		return nil, session.ExpectedCount, true, nil
+	}
+	var records []model.FlightLogSyncRecord
+	if err := r.db.WithContext(ctx).
+		Where("sync_id = ? AND user_id = ?", syncID, userID).
+		Order("batch_index ASC, record_index ASC").Find(&records).Error; err != nil {
+		return nil, 0, false, err
+	}
+	if len(records) != session.ExpectedCount || session.StagedCount != session.ExpectedCount || session.NextBatchIndex != session.ExpectedCount {
+		return nil, 0, false, ErrFlightLogSyncConflict
+	}
+	return records, session.ExpectedCount, false, nil
+}
+
+func (r *GormFlightLogRepository) CommitSyncArchives(ctx context.Context, userID, syncID uuid.UUID, now time.Time) (int, []uuid.UUID, error) {
+	var synced int
+	var previousArchiveIDs []uuid.UUID
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockFlightLogOwner(tx, userID); err != nil {
+			return err
+		}
+		var session model.FlightLogSync
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND expires_at > ?", syncID, userID, now).
+			First(&session).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrFlightLogSyncNotFound
+			}
+			return err
+		}
+		if session.CommittedAt != nil {
+			synced = session.ExpectedCount
+			return nil
+		}
+		var recordCount int64
+		if err := tx.Model(&model.FlightLogSyncRecord{}).Where("sync_id = ? AND user_id = ?", syncID, userID).Count(&recordCount).Error; err != nil {
+			return err
+		}
+		if session.StagedCount != session.ExpectedCount || int(recordCount) != session.ExpectedCount || session.NextBatchIndex != session.ExpectedCount {
+			return ErrFlightLogSyncConflict
+		}
+		var oldRows []model.FlightLog
+		if err := tx.Select("archive_id").Where("user_id = ? AND archive_id IS NOT NULL", userID).Find(&oldRows).Error; err != nil {
+			return err
+		}
+		for _, row := range oldRows {
+			if row.ArchiveID != nil {
+				previousArchiveIDs = append(previousArchiveIDs, *row.ArchiveID)
+			}
+		}
+		if err := replaceFlightLogsFromSyncTx(tx, userID, syncID); err != nil {
+			return err
+		}
+		committedAt := now
+		if err := tx.Model(&session).Updates(map[string]any{
+			"committed_at": committedAt,
+			"staged_count": 0,
+			"staged_bytes": 0,
+		}).Error; err != nil {
+			return err
+		}
+		synced = session.ExpectedCount
+		return nil
+	})
+	if err != nil {
+		return 0, nil, err
+	}
+	return synced, previousArchiveIDs, nil
+}
+
 func (r *GormFlightLogRepository) CommitSync(ctx context.Context, userID, syncID uuid.UUID, now time.Time) (int, error) {
 	var synced int
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -241,6 +403,9 @@ func (r *GormFlightLogRepository) CommitSync(ctx context.Context, userID, syncID
 		if syncSession.CommittedAt != nil {
 			synced = syncSession.ExpectedCount
 			return nil
+		}
+		if syncSession.ArchiveMode {
+			return ErrFlightLogSyncConflict
 		}
 		var batchCount, recordCount int64
 		if err := tx.Model(&model.FlightLogSyncBatch{}).Where("sync_id = ? AND user_id = ?", syncID, userID).Count(&batchCount).Error; err != nil {
@@ -292,12 +457,12 @@ func replaceFlightLogsFromSyncTx(tx *gorm.DB, userID, syncID uuid.UUID) error {
 		return err
 	}
 	return tx.Exec(`
-		INSERT INTO flight_logs (id, user_id, started_at, point_count, data, created_at)
-		SELECT staged.staged_id, staged.user_id, staged.started_at, staged.point_count, staged.data, CURRENT_TIMESTAMP
+		INSERT INTO flight_logs (id, user_id, started_at, point_count, data, archive_id, created_at)
+		SELECT COALESCE(staged.archive_id, staged.staged_id), staged.user_id, staged.started_at, staged.point_count, staged.data, staged.archive_id, CURRENT_TIMESTAMP
 		FROM flight_log_sync_records AS staged
 		WHERE staged.sync_id = ? AND staged.user_id = ?
 		ON CONFLICT (user_id, started_at, point_count)
-		DO UPDATE SET data = EXCLUDED.data
+		DO UPDATE SET data = EXCLUDED.data, archive_id = EXCLUDED.archive_id
 	`, syncID, userID).Error
 }
 

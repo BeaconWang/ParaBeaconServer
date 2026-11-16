@@ -94,11 +94,15 @@ Open `/` for the ParaBeacon home page. It provides the primary navigation, accou
 
 Open `/live` for the public full-screen map; signing in is optional. It loads every cursor page of publicly shared active pilots and refreshes the map every 15 seconds. The panel shows each returned pilot name, coordinates, heading when available, observation time, and freshness status; the page intentionally does not expose altitude or other private telemetry because the public API contract excludes those fields. The authenticated public-map API also includes the signed-in user's own opted-in session; anonymous requests include all opted-in sessions.
 
-Authenticated `GET /api/v1/flight-logs` and `/api/v1/chat` remain reserved and return `501 Not Implemented`; Redis client initialization is available for future modules.
+Authenticated `GET /api/v1/flight-logs` returns the signed-in account's paginated records. Snapshot synchronization uses `POST /api/v1/flight-logs/syncs` to begin, one binary `PUT /api/v1/flight-logs/syncs/{sync_id}/flights/{index}` with `Content-Type: application/zip` per flight, then `POST /api/v1/flight-logs/syncs/{sync_id}/commit`. Only commit replaces the account's live records; incomplete uploads remain staged and expire. `/api/v1/chat` remains reserved and returns `501 Not Implemented`.
 
 ## Android APK releases
 
 APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./data/apks`) and indexed in the `app_releases` table by Android `versionCode`. Mount that directory on persistent storage in production. Set `APK_PACKAGE_NAME` to the Android application ID. Public clients can query `GET /api/v1/app/releases/latest` for the newest build or `GET /api/v1/app/releases` for every published version. Every published version is publicly downloadable through its `download_url` at `GET /api/v1/app/releases/{version_code}/download`; downloads are served as APK attachments and include a SHA-256 digest, byte size, and an atomic download count for client verification and statistics. The `/release` page, release metadata APIs, and APK downloads all send no-store cache headers so clients request current server data.
+
+## Flight archives
+
+Flight synchronization stores one maximally compressed `.flight.zip` file per flight under `FLIGHT_LOG_STORAGE_DIR` (default `./data/flights`). The server generates each archive GUID and stores it with the account/flight metadata in `flight_logs`. Mount this directory on persistent storage in production; the database alone is not sufficient to restore synchronized flight records.
 
 Publishing is disabled unless `APK_RELEASE_ADMIN_TOKEN` contains a secret of at least 32 characters. Keep it in a secret manager; never include it in the app. Upload a signed APK directly as the request body:
 

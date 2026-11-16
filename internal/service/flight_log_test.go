@@ -1,9 +1,13 @@
 package service
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,13 +16,14 @@ import (
 )
 
 type flightLogTestRepository struct {
-	userID      uuid.UUID
-	logs        []model.FlightLog
-	limit       int
-	replaceCall int
-	syncs       map[uuid.UUID]*model.FlightLogSync
-	batches     map[uuid.UUID]map[int][]model.FlightLog
-	hashes      map[uuid.UUID]map[int]string
+	userID         uuid.UUID
+	logs           []model.FlightLog
+	limit          int
+	replaceCall    int
+	syncs          map[uuid.UUID]*model.FlightLogSync
+	batches        map[uuid.UUID]map[int][]model.FlightLog
+	hashes         map[uuid.UUID]map[int]string
+	archiveRecords map[uuid.UUID]map[int]model.FlightLogSyncRecord
 }
 
 func (r *flightLogTestRepository) Import(_ context.Context, userID uuid.UUID, logs []model.FlightLog) (int, int, error) {
@@ -37,11 +42,13 @@ func (r *flightLogTestRepository) BeginSync(_ context.Context, syncSession *mode
 		r.syncs = make(map[uuid.UUID]*model.FlightLogSync)
 		r.batches = make(map[uuid.UUID]map[int][]model.FlightLog)
 		r.hashes = make(map[uuid.UUID]map[int]string)
+		r.archiveRecords = make(map[uuid.UUID]map[int]model.FlightLogSyncRecord)
 	}
 	copy := *syncSession
 	r.syncs[syncSession.ID] = &copy
 	r.batches[syncSession.ID] = make(map[int][]model.FlightLog)
 	r.hashes[syncSession.ID] = make(map[int]string)
+	r.archiveRecords[syncSession.ID] = make(map[int]model.FlightLogSyncRecord)
 	return nil
 }
 
@@ -56,7 +63,7 @@ func (r *flightLogTestRepository) StageSyncBatch(_ context.Context, userID, sync
 		}
 		return ErrFlightLogSyncConflict
 	}
-	if session.CommittedAt != nil || batchIndex != session.NextBatchIndex || session.StagedCount+len(logs) > session.ExpectedCount || session.StagedBytes+batchBytes > MaxFlightLogSnapshotBytes {
+	if session.CommittedAt != nil || session.ArchiveMode || batchIndex != session.NextBatchIndex || session.StagedCount+len(logs) > session.ExpectedCount || session.StagedBytes+batchBytes > MaxFlightLogSnapshotBytes {
 		return ErrFlightLogSyncConflict
 	}
 	for _, batch := range r.batches[syncID] {
@@ -76,6 +83,95 @@ func (r *flightLogTestRepository) StageSyncBatch(_ context.Context, userID, sync
 	return nil
 }
 
+func (r *flightLogTestRepository) StageSyncArchive(_ context.Context, userID, syncID uuid.UUID, flightIndex int, payloadHash string, record *model.FlightLogSyncRecord, archiveBytes int64, now time.Time) (uuid.UUID, error) {
+	session := r.syncs[syncID]
+	if session == nil || session.UserID != userID || !session.ExpiresAt.After(now) {
+		return uuid.Nil, ErrFlightLogSyncNotFound
+	}
+	if previousHash, exists := r.hashes[syncID][flightIndex]; exists {
+		if previousHash != payloadHash {
+			return uuid.Nil, ErrFlightLogSyncConflict
+		}
+		return *r.archiveRecords[syncID][flightIndex].ArchiveID, nil
+	}
+	if flightIndex != session.NextBatchIndex || session.CommittedAt != nil || session.StagedCount >= session.ExpectedCount || session.StagedBytes+archiveBytes > MaxFlightLogSnapshotBytes {
+		return uuid.Nil, ErrFlightLogSyncConflict
+	}
+	for _, previous := range r.archiveRecords[syncID] {
+		if previous.StartedAt.Equal(record.StartedAt) && previous.PointCount == record.PointCount {
+			return uuid.Nil, ErrFlightLogSyncConflict
+		}
+	}
+	r.archiveRecords[syncID][flightIndex] = *record
+	r.hashes[syncID][flightIndex] = payloadHash
+	session.ArchiveMode = true
+	session.StagedCount++
+	session.StagedBytes += archiveBytes
+	session.NextBatchIndex++
+	return *record.ArchiveID, nil
+}
+
+func (r *flightLogTestRepository) SyncArchivePlan(_ context.Context, userID, syncID uuid.UUID, now time.Time) ([]model.FlightLogSyncRecord, int, bool, error) {
+	session := r.syncs[syncID]
+	if session == nil || session.UserID != userID || !session.ExpiresAt.After(now) {
+		return nil, 0, false, ErrFlightLogSyncNotFound
+	}
+	if session.CommittedAt != nil {
+		return nil, session.ExpectedCount, true, nil
+	}
+	if session.StagedCount != session.ExpectedCount {
+		return nil, 0, false, ErrFlightLogSyncConflict
+	}
+	records := make([]model.FlightLogSyncRecord, session.ExpectedCount)
+	for index := 0; index < session.ExpectedCount; index++ {
+		record, ok := r.archiveRecords[syncID][index]
+		if !ok {
+			return nil, 0, false, ErrFlightLogSyncConflict
+		}
+		records[index] = record
+	}
+	return records, session.ExpectedCount, false, nil
+}
+
+func (r *flightLogTestRepository) CommitSyncArchives(_ context.Context, userID, syncID uuid.UUID, now time.Time) (int, []uuid.UUID, error) {
+	session := r.syncs[syncID]
+	if session == nil || session.UserID != userID || !session.ExpiresAt.After(now) {
+		return 0, nil, ErrFlightLogSyncNotFound
+	}
+	if session.CommittedAt != nil {
+		return session.ExpectedCount, nil, nil
+	}
+	if session.StagedCount != session.ExpectedCount {
+		return 0, nil, ErrFlightLogSyncConflict
+	}
+	var oldArchives []uuid.UUID
+	for _, log := range r.logs {
+		if log.ArchiveID != nil {
+			oldArchives = append(oldArchives, *log.ArchiveID)
+		}
+	}
+	logs := make([]model.FlightLog, session.ExpectedCount)
+	for index := 0; index < session.ExpectedCount; index++ {
+		record, ok := r.archiveRecords[syncID][index]
+		if !ok || record.ArchiveID == nil {
+			return 0, nil, ErrFlightLogSyncConflict
+		}
+		logs[index] = model.FlightLog{
+			ID:         *record.ArchiveID,
+			UserID:     userID,
+			StartedAt:  record.StartedAt,
+			PointCount: record.PointCount,
+			Data:       "null",
+			ArchiveID:  record.ArchiveID,
+		}
+	}
+	r.userID, r.logs = userID, logs
+	r.replaceCall++
+	committedAt := now
+	session.CommittedAt = &committedAt
+	return len(logs), oldArchives, nil
+}
+
 func (r *flightLogTestRepository) CommitSync(_ context.Context, userID, syncID uuid.UUID, now time.Time) (int, error) {
 	session := r.syncs[syncID]
 	if session == nil || session.UserID != userID || !session.ExpiresAt.After(now) {
@@ -83,6 +179,9 @@ func (r *flightLogTestRepository) CommitSync(_ context.Context, userID, syncID u
 	}
 	if session.CommittedAt != nil {
 		return session.ExpectedCount, nil
+	}
+	if session.ArchiveMode {
+		return 0, ErrFlightLogSyncConflict
 	}
 	if session.StagedCount != session.ExpectedCount || len(r.batches[syncID]) != session.NextBatchIndex {
 		return 0, ErrFlightLogSyncConflict
@@ -105,7 +204,139 @@ func (r *flightLogTestRepository) CommitSync(_ context.Context, userID, syncID u
 
 func (r *flightLogTestRepository) List(_ context.Context, userID, _ uuid.UUID, limit int) ([]model.FlightLog, bool, error) {
 	r.userID, r.limit = userID, limit
-	return nil, false, nil
+	return r.logs, false, nil
+}
+
+func makeFlightPackage(t *testing.T, flightJSON []byte) []byte {
+	t.Helper()
+	var output bytes.Buffer
+	archive := zip.NewWriter(&output)
+	entry, err := archive.Create("flight.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write(flightJSON); err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return output.Bytes()
+}
+
+func TestFlightArchiveSyncStoresGuidNamedZipAndListsFlightJSON(t *testing.T) {
+	storage, err := NewFlightArchiveStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFlightArchiveStorage() error = %v", err)
+	}
+	repository := &flightLogTestRepository{}
+	logs := NewFlightLogService(repository, storage)
+	userID := uuid.New()
+	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	flightJSON, err := json.Marshal(map[string]any{
+		"startTime":  start.UnixMilli(),
+		"endTime":    start.Add(time.Minute).UnixMilli(),
+		"pointCount": 2,
+		"samples":    []any{},
+	})
+	if err != nil {
+		t.Fatalf("marshal flight: %v", err)
+	}
+	syncID, err := logs.BeginSync(context.Background(), userID, 1)
+	if err != nil {
+		t.Fatalf("BeginSync() error = %v", err)
+	}
+	flightPackage := makeFlightPackage(t, flightJSON)
+	archiveID, err := logs.UploadSyncFlightArchive(context.Background(), userID, syncID, 0, bytes.NewReader(flightPackage))
+	if err != nil {
+		t.Fatalf("UploadSyncFlightArchive() error = %v", err)
+	}
+	retryArchiveID, err := logs.UploadSyncFlightArchive(context.Background(), userID, syncID, 0, bytes.NewReader(flightPackage))
+	if err != nil || retryArchiveID != archiveID {
+		t.Fatalf("idempotent archive upload = %s, %v; want %s", retryArchiveID, err, archiveID)
+	}
+	if _, err := os.Stat(storage.archivePath(archiveID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("archive became visible before sync commit: stat error = %v", err)
+	}
+
+	synced, err := logs.CommitSync(context.Background(), userID, syncID)
+	if err != nil || synced != 1 {
+		t.Fatalf("CommitSync() = %d, %v; want 1, nil", synced, err)
+	}
+	stored := repository.logs
+	if len(stored) != 1 || stored[0].ArchiveID == nil || *stored[0].ArchiveID != archiveID || stored[0].ID != archiveID || stored[0].Data != "null" {
+		t.Fatalf("stored flight log = %#v", stored)
+	}
+	if filepath.Base(storage.archivePath(archiveID)) != archiveID.String()+".flight.zip" {
+		t.Fatalf("archive path = %q", storage.archivePath(archiveID))
+	}
+	storedJSON, err := storage.Read(archiveID)
+	if err != nil || !bytes.Equal(storedJSON, flightJSON) {
+		t.Fatalf("stored archive flight data differs: error = %v", err)
+	}
+	listed, _, err := logs.List(context.Background(), userID, uuid.Nil)
+	if err != nil || len(listed) != 1 || listed[0].Data != string(flightJSON) {
+		t.Fatalf("List() archive hydration = %#v, %v", listed, err)
+	}
+
+	updatedFlightJSON, err := json.Marshal(map[string]any{
+		"startTime": start.UnixMilli(), "endTime": start.Add(time.Minute).UnixMilli(), "pointCount": 2, "pilotName": "updated",
+	})
+	if err != nil {
+		t.Fatalf("marshal updated flight: %v", err)
+	}
+	nextSyncID, err := logs.BeginSync(context.Background(), userID, 1)
+	if err != nil {
+		t.Fatalf("BeginSync(replacement) error = %v", err)
+	}
+	newArchiveID, err := logs.UploadSyncFlightArchive(context.Background(), userID, nextSyncID, 0, bytes.NewReader(makeFlightPackage(t, updatedFlightJSON)))
+	if err != nil {
+		t.Fatalf("UploadSyncFlightArchive(replacement) error = %v", err)
+	}
+	if synced, err := logs.CommitSync(context.Background(), userID, nextSyncID); err != nil || synced != 1 {
+		t.Fatalf("CommitSync(replacement) = %d, %v; want 1, nil", synced, err)
+	}
+	if len(repository.logs) != 1 || repository.logs[0].ArchiveID == nil || *repository.logs[0].ArchiveID != newArchiveID {
+		t.Fatalf("replacement created duplicate flight rows: %#v", repository.logs)
+	}
+	if _, err := os.Stat(storage.archivePath(archiveID)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("replaced archive was not removed: stat error = %v", err)
+	}
+	listed, _, err = logs.List(context.Background(), userID, uuid.Nil)
+	if err != nil || len(listed) != 1 || listed[0].Data != string(updatedFlightJSON) {
+		t.Fatalf("updated List() archive hydration = %#v, %v", listed, err)
+	}
+}
+
+func TestFlightArchiveSyncRejectsMalformedOrDuplicateFlightPackages(t *testing.T) {
+	storage, err := NewFlightArchiveStorage(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFlightArchiveStorage() error = %v", err)
+	}
+	repository := &flightLogTestRepository{}
+	logs := NewFlightLogService(repository, storage)
+	userID := uuid.New()
+	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	flightJSON, _ := json.Marshal(map[string]any{
+		"startTime": start.UnixMilli(), "endTime": start.Add(time.Minute).UnixMilli(), "pointCount": 2,
+	})
+	syncID, err := logs.BeginSync(context.Background(), userID, 2)
+	if err != nil {
+		t.Fatalf("BeginSync() error = %v", err)
+	}
+	packageBytes := makeFlightPackage(t, flightJSON)
+	if _, err := logs.UploadSyncFlightArchive(context.Background(), userID, syncID, 0, bytes.NewReader([]byte("not a zip"))); !errors.Is(err, ErrInvalidFlightArchive) {
+		t.Fatalf("invalid archive error = %v, want ErrInvalidFlightArchive", err)
+	}
+	if _, err := logs.UploadSyncFlightArchive(context.Background(), userID, syncID, 0, bytes.NewReader(packageBytes)); err != nil {
+		t.Fatalf("UploadSyncFlightArchive(0) error = %v", err)
+	}
+	if _, err := logs.UploadSyncFlightArchive(context.Background(), userID, syncID, 1, bytes.NewReader(packageBytes)); !errors.Is(err, ErrFlightLogSyncConflict) {
+		t.Fatalf("duplicate flight identity error = %v, want conflict", err)
+	}
+	if repository.replaceCall != 0 {
+		t.Fatal("invalid/duplicate archive changed the live snapshot")
+	}
 }
 
 func TestFlightLogServiceValidatesAndStoresRecords(t *testing.T) {

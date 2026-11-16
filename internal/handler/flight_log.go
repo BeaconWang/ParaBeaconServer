@@ -26,6 +26,7 @@ type FlightLogService interface {
 	Sync(ctx context.Context, userID uuid.UUID, flights []json.RawMessage) (int, error)
 	BeginSync(ctx context.Context, userID uuid.UUID, expectedCount int) (uuid.UUID, error)
 	UploadSyncBatch(ctx context.Context, userID, syncID uuid.UUID, batchIndex int, flights []json.RawMessage) error
+	UploadSyncFlightArchive(ctx context.Context, userID, syncID uuid.UUID, flightIndex int, source io.Reader) (uuid.UUID, error)
 	CommitSync(ctx context.Context, userID, syncID uuid.UUID) (int, error)
 	List(ctx context.Context, userID, after uuid.UUID) ([]model.FlightLog, bool, error)
 }
@@ -150,6 +151,41 @@ func (h *FlightLogHandler) UploadSyncBatch(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"accepted": len(request.Flights), "batch_index": batchIndex})
+}
+
+func (h *FlightLogHandler) UploadSyncFlightArchive(c *gin.Context) {
+	userID, ok := flightLogUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	syncID, err := uuid.Parse(c.Param("sync_id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid sync id")
+		return
+	}
+	flightIndex, err := strconv.Atoi(c.Param("flight_index"))
+	if err != nil || flightIndex < 0 {
+		respondError(c, http.StatusBadRequest, "invalid flight index")
+		return
+	}
+	if mediaType := c.GetHeader("Content-Type"); mediaType != "application/zip" && mediaType != "application/octet-stream" {
+		respondError(c, http.StatusUnsupportedMediaType, "flight package must be a ZIP archive")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxFlightArchiveBytes+1)
+	archiveID, err := h.logs.UploadSyncFlightArchive(c.Request.Context(), userID, syncID, flightIndex, c.Request.Body)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidFlightArchive) || handleFlightLogSyncError(c, err) {
+			if errors.Is(err, service.ErrInvalidFlightArchive) {
+				respondError(c, http.StatusBadRequest, "invalid flight package")
+			}
+			return
+		}
+		respondInternalError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"accepted": true, "flight_index": flightIndex, "archive_id": archiveID.String()})
 }
 
 func (h *FlightLogHandler) CommitSync(c *gin.Context) {

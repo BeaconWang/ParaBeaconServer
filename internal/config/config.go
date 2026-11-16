@@ -24,6 +24,7 @@ type Config struct {
 	APKStorageDir        string
 	APKPackageName       string
 	APKReleaseAdminToken string
+	FlightLogStorageDir  string
 }
 
 func Load() (Config, error) {
@@ -61,6 +62,7 @@ func Load() (Config, error) {
 		APKStorageDir:        env("APK_STORAGE_DIR", "./data/apks"),
 		APKPackageName:       env("APK_PACKAGE_NAME", "com.beacon.parabeacon"),
 		APKReleaseAdminToken: os.Getenv("APK_RELEASE_ADMIN_TOKEN"),
+		FlightLogStorageDir:  env("FLIGHT_LOG_STORAGE_DIR", "./data/flights"),
 	}
 	if cfg.DatabaseDSN == "" {
 		return Config{}, fmt.Errorf("DATABASE_DSN is required")

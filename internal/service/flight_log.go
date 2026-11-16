@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"math"
 	"strconv"
 	"time"
@@ -43,16 +44,24 @@ type FlightLogRepository interface {
 	Replace(ctx context.Context, userID uuid.UUID, logs []model.FlightLog) error
 	BeginSync(ctx context.Context, syncSession *model.FlightLogSync) error
 	StageSyncBatch(ctx context.Context, userID, syncID uuid.UUID, batchIndex int, payloadHash string, logs []model.FlightLog, batchBytes int64, now time.Time) error
+	StageSyncArchive(ctx context.Context, userID, syncID uuid.UUID, batchIndex int, payloadHash string, record *model.FlightLogSyncRecord, archiveBytes int64, now time.Time) (uuid.UUID, error)
+	SyncArchivePlan(ctx context.Context, userID, syncID uuid.UUID, now time.Time) ([]model.FlightLogSyncRecord, int, bool, error)
+	CommitSyncArchives(ctx context.Context, userID, syncID uuid.UUID, now time.Time) (int, []uuid.UUID, error)
 	CommitSync(ctx context.Context, userID, syncID uuid.UUID, now time.Time) (int, error)
 	List(ctx context.Context, userID, after uuid.UUID, limit int) ([]model.FlightLog, bool, error)
 }
 
 type FlightLogService struct {
-	logs FlightLogRepository
+	logs     FlightLogRepository
+	archives *FlightArchiveStorage
 }
 
-func NewFlightLogService(logs FlightLogRepository) *FlightLogService {
-	return &FlightLogService{logs: logs}
+func NewFlightLogService(logs FlightLogRepository, archives ...*FlightArchiveStorage) *FlightLogService {
+	service := &FlightLogService{logs: logs}
+	if len(archives) > 0 {
+		service.archives = archives[0]
+	}
+	return service
 }
 
 func (s *FlightLogService) BeginSync(ctx context.Context, userID uuid.UUID, expectedCount int) (uuid.UUID, error) {
@@ -60,6 +69,11 @@ func (s *FlightLogService) BeginSync(ctx context.Context, userID uuid.UUID, expe
 		return uuid.Nil, ErrInvalidFlightLog
 	}
 	now := time.Now().UTC()
+	if s.archives != nil {
+		if err := s.archives.CleanupExpiredStages(now.Add(-FlightLogSyncLifetime)); err != nil {
+			return uuid.Nil, err
+		}
+	}
 	session := &model.FlightLogSync{
 		ID:            uuid.New(),
 		UserID:        userID,
@@ -96,9 +110,105 @@ func (s *FlightLogService) UploadSyncBatch(ctx context.Context, userID, syncID u
 	return s.logs.StageSyncBatch(ctx, userID, syncID, batchIndex, hashFlightLogBatch(flights), logs, batchBytes, time.Now().UTC())
 }
 
+func (s *FlightLogService) UploadSyncFlightArchive(ctx context.Context, userID, syncID uuid.UUID, flightIndex int, source io.Reader) (uuid.UUID, error) {
+	if s.archives == nil || userID == uuid.Nil || syncID == uuid.Nil || flightIndex < 0 || flightIndex >= MaxFlightLogSnapshotSize || source == nil {
+		return uuid.Nil, ErrInvalidFlightLog
+	}
+	archiveID := uuid.New()
+	flightJSON, archiveBytes, payloadHash, err := s.archives.Stage(ctx, syncID, archiveID, source)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	logs, err := parseFlightLogs([]json.RawMessage{flightJSON})
+	if err != nil || len(logs) != 1 {
+		_ = s.archives.RemoveStaged(syncID, archiveID)
+		return uuid.Nil, ErrInvalidFlightArchive
+	}
+	log := logs[0]
+	log.ArchiveID = &archiveID
+	stagedRecord := &model.FlightLogSyncRecord{
+		StagedID:    uuid.New(),
+		SyncID:      syncID,
+		UserID:      userID,
+		BatchIndex:  flightIndex,
+		RecordIndex: 0,
+		StartedAt:   log.StartedAt,
+		PointCount:  log.PointCount,
+		ArchiveID:   &archiveID,
+		Data:        "null",
+	}
+	storedArchiveID, err := s.logs.StageSyncArchive(ctx, userID, syncID, flightIndex, payloadHash, stagedRecord, archiveBytes, time.Now().UTC())
+	if err != nil {
+		_ = s.archives.RemoveStaged(syncID, archiveID)
+		return uuid.Nil, err
+	}
+	if storedArchiveID != archiveID {
+		_ = s.archives.RemoveStaged(syncID, archiveID)
+	}
+	return storedArchiveID, nil
+}
+
+func (s *FlightLogService) CommitArchiveSync(ctx context.Context, userID, syncID uuid.UUID) (int, error) {
+	if s.archives == nil || userID == uuid.Nil || syncID == uuid.Nil {
+		return 0, ErrInvalidFlightLog
+	}
+	now := time.Now().UTC()
+	stagedRecords, expectedCount, committed, err := s.logs.SyncArchivePlan(ctx, userID, syncID, now)
+	if err != nil {
+		return 0, err
+	}
+	if committed {
+		return expectedCount, nil
+	}
+	if len(stagedRecords) != expectedCount {
+		return 0, ErrFlightLogSyncConflict
+	}
+	archiveIDs := make([]uuid.UUID, 0, len(stagedRecords))
+	for _, record := range stagedRecords {
+		if record.ArchiveID == nil || *record.ArchiveID == uuid.Nil {
+			return 0, ErrFlightLogSyncConflict
+		}
+		archiveIDs = append(archiveIDs, *record.ArchiveID)
+	}
+	for _, archiveID := range archiveIDs {
+		if err := s.archives.Publish(syncID, archiveID); err != nil {
+			return 0, err
+		}
+	}
+	synced, previousArchiveIDs, err := s.logs.CommitSyncArchives(ctx, userID, syncID, now)
+	if err != nil {
+		return 0, err
+	}
+	for _, previousID := range previousArchiveIDs {
+		if previousID != uuid.Nil {
+			_ = s.archives.Remove(previousID)
+		}
+	}
+	_ = s.archives.CleanupSession(syncID)
+	return synced, nil
+}
+
 func (s *FlightLogService) CommitSync(ctx context.Context, userID, syncID uuid.UUID) (int, error) {
 	if userID == uuid.Nil || syncID == uuid.Nil {
 		return 0, ErrInvalidFlightLog
+	}
+	if s.archives != nil {
+		records, expectedCount, committed, err := s.logs.SyncArchivePlan(ctx, userID, syncID, time.Now().UTC())
+		if err == nil && committed {
+			return expectedCount, nil
+		}
+		if err == nil && len(records) == expectedCount {
+			allArchived := true
+			for _, record := range records {
+				if record.ArchiveID == nil {
+					allArchived = false
+					break
+				}
+			}
+			if allArchived {
+				return s.CommitArchiveSync(ctx, userID, syncID)
+			}
+		}
 	}
 	return s.logs.CommitSync(ctx, userID, syncID, time.Now().UTC())
 }
@@ -195,7 +305,25 @@ func (s *FlightLogService) List(ctx context.Context, userID, after uuid.UUID) ([
 	if userID == uuid.Nil {
 		return nil, false, ErrInvalidFlightLog
 	}
-	return s.logs.List(ctx, userID, after, FlightLogPageSize)
+	logs, hasMore, err := s.logs.List(ctx, userID, after, FlightLogPageSize)
+	if err != nil || s.archives == nil {
+		return logs, hasMore, err
+	}
+	for index := range logs {
+		if logs[index].ArchiveID == nil {
+			continue
+		}
+		flightJSON, err := s.archives.Read(*logs[index].ArchiveID)
+		if err != nil {
+			return nil, false, err
+		}
+		parsed, err := parseFlightLogs([]json.RawMessage{flightJSON})
+		if err != nil || len(parsed) != 1 || !parsed[0].StartedAt.Equal(logs[index].StartedAt) || parsed[0].PointCount != logs[index].PointCount {
+			return nil, false, ErrInvalidFlightArchive
+		}
+		logs[index].Data = string(flightJSON)
+	}
+	return logs, hasMore, nil
 }
 
 func readFlightTime(raw json.RawMessage) (time.Time, bool) {

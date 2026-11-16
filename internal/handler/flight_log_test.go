@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,6 +49,12 @@ func (s *flightLogHandlerTestService) UploadSyncBatch(_ context.Context, userID,
 	s.userID, s.syncID, s.batchIndex, s.flights = userID, syncID, batchIndex, flights
 	s.batchCalls++
 	return nil
+}
+
+func (s *flightLogHandlerTestService) UploadSyncFlightArchive(_ context.Context, userID, syncID uuid.UUID, flightIndex int, _ io.Reader) (uuid.UUID, error) {
+	s.userID, s.syncID, s.batchIndex = userID, syncID, flightIndex
+	s.batchCalls++
+	return uuid.New(), nil
 }
 
 func (s *flightLogHandlerTestService) CommitSync(_ context.Context, userID, syncID uuid.UUID) (int, error) {
@@ -120,6 +127,10 @@ func TestFlightLogStagedSyncEndpointsUseAuthenticatedAccount(t *testing.T) {
 		c.Set(middleware.AuthenticatedUserIDKey, userID)
 		handler.UploadSyncBatch(c)
 	})
+	engine.PUT("/flight-logs/syncs/:sync_id/flights/:flight_index", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.UploadSyncFlightArchive(c)
+	})
 	engine.POST("/flight-logs/syncs/:sync_id/commit", func(c *gin.Context) {
 		c.Set(middleware.AuthenticatedUserIDKey, userID)
 		handler.CommitSync(c)
@@ -141,6 +152,15 @@ func TestFlightLogStagedSyncEndpointsUseAuthenticatedAccount(t *testing.T) {
 	engine.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || service.batchCalls != 1 || service.batchIndex != 0 || service.userID != userID {
 		t.Fatalf("batch status=%d user=%s calls=%d index=%d body=%s", response.Code, service.userID, service.batchCalls, service.batchIndex, response.Body.String())
+	}
+
+	archivePath := "/flight-logs/syncs/" + service.syncID.String() + "/flights/0"
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPut, archivePath, strings.NewReader("zip-bytes"))
+	request.Header.Set("Content-Type", "application/zip")
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || service.batchCalls != 2 || service.batchIndex != 0 || service.userID != userID {
+		t.Fatalf("archive upload status=%d user=%s calls=%d index=%d body=%s", response.Code, service.userID, service.batchCalls, service.batchIndex, response.Body.String())
 	}
 
 	response = httptest.NewRecorder()

@@ -63,7 +63,11 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	trackingService := service.NewTrackingService(trackingRepo)
 	trackingHandler := handler.NewTrackingHandler(trackingService)
 	flightLogRepo := repository.NewFlightLogRepository(db)
-	flightLogService := service.NewFlightLogService(flightLogRepo)
+	flightArchiveStorage, err := service.NewFlightArchiveStorage(cfg.FlightLogStorageDir)
+	if err != nil {
+		return nil, err
+	}
+	flightLogService := service.NewFlightLogService(flightLogRepo, flightArchiveStorage)
 	flightLogHandler := handler.NewFlightLogHandler(flightLogService)
 	landingPointRepo := repository.NewLandingPointRepository(db)
 	landingPointService := service.NewLandingPointService(landingPointRepo)
@@ -107,6 +111,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.PUT("/flight-logs/sync", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), flightLogHandler.Sync)
 		protected.POST("/flight-logs/syncs", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), flightLogHandler.BeginSync)
 		protected.PUT("/flight-logs/syncs/:sync_id/batches/:batch_index", middleware.NewFixedWindowLimiter(600, time.Minute, 10000).Middleware(), flightLogHandler.UploadSyncBatch)
+		protected.PUT("/flight-logs/syncs/:sync_id/flights/:flight_index", middleware.NewFixedWindowLimiter(600, time.Minute, 10000).Middleware(), flightLogHandler.UploadSyncFlightArchive)
 		protected.POST("/flight-logs/syncs/:sync_id/commit", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), flightLogHandler.CommitSync)
 		protected.GET("/landing-points", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), landingPointHandler.List)
 		protected.POST("/landing-points", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), landingPointHandler.Import)
