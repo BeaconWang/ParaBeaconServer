@@ -82,7 +82,7 @@
         <h1 data-i18n="releaseControlRoom">Release control room</h1>
         <p class="subtitle" data-i18n="subtitle">Publish signed Android packages, inspect release history, and keep the latest build ready for pilots.</p>
       </div>
-      <div class="header-actions"><a class="button secondary" href="/live" data-i18n="liveTracking">Live map</a><button id="language-toggle" class="secondary" type="button" aria-label="Switch language">中文</button><div class="badge" data-i18n="protectedPublisher">Protected publisher</div></div>
+      <div class="header-actions"><a class="button secondary" href="/live" data-i18n="liveTracking">Live map</a><span data-auth-widget></span><button id="language-toggle" class="secondary" type="button" aria-label="Switch language">中文</button><div class="badge" data-i18n="protectedPublisher">Protected publisher</div></div>
     </header>
 
     <section class="grid">
@@ -118,6 +118,7 @@
     <div class="notes-header"><h2 id="notes-title"></h2><button id="close-notes" class="icon-button" type="button" data-i18n-aria-label="closeNotes" aria-label="Close notes"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
     <div id="notes-content" class="markdown"></div>
   </aside>
+  <script src="/assets/auth.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const translations = {

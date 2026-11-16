@@ -112,9 +112,12 @@ func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID
 		Table("live_track_sessions AS s").
 		Select("s.id AS session_id, s.pilot_name, latest.latitude, latest.longitude, latest.heading, latest.timestamp AS observed_at").
 		Joins("JOIN LATERAL (SELECT p.latitude, p.longitude, p.heading, p.timestamp FROM live_track_points p WHERE p.session_id = s.id ORDER BY p.timestamp DESC LIMIT 1) AS latest ON TRUE").
-		Where("s.ended_at IS NULL AND s.publicly_share = ? AND s.user_id <> ?", true, userID).
+		Where("s.ended_at IS NULL AND s.publicly_share = ?", true).
 		Where("latest.timestamp >= ? AND latest.timestamp <= ?", observedSince, observedUntil).
 		Where("latest.latitude BETWEEN ? AND ?", south, north)
+	if userID != uuid.Nil {
+		query = query.Where("s.user_id <> ?", userID)
+	}
 	if west <= east {
 		query = query.Where("latest.longitude BETWEEN ? AND ?", west, east)
 	} else {

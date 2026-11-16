@@ -80,11 +80,7 @@ func (h *TrackingHandler) ListActive(c *gin.Context) {
 }
 
 func (h *TrackingHandler) ListPublicLocations(c *gin.Context) {
-	userID, ok := trackingUserID(c)
-	if !ok {
-		respondError(c, http.StatusUnauthorized, "unauthorized")
-		return
-	}
+	userID, _ := trackingUserID(c)
 	parseBound := func(key string) (float64, bool) {
 		value, err := strconv.ParseFloat(c.Query(key), 64)
 		return value, err == nil

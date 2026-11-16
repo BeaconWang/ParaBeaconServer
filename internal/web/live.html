@@ -75,32 +75,19 @@
   <div id="map" aria-label="Live tracking map"></div>
   <header class="topbar">
     <div class="brand"><div class="brand-mark" aria-hidden="true">PB</div><div><div class="eyebrow">ParaBeacon / Live</div><h1>Public flight tracking</h1></div></div>
-    <div class="topbar-actions"><a class="button secondary" href="/release">Release console</a><button id="logout" class="button danger" type="button" hidden>Sign out</button></div>
+    <div class="topbar-actions"><a class="button secondary" href="/">Home</a><a class="button secondary" href="/release">Release console</a><span data-auth-widget></span></div>
   </header>
   <aside class="panel" aria-labelledby="pilots-title">
-    <div class="panel-header"><div><h2 id="pilots-title">Live pilots</h2><p id="last-refresh">Waiting for a secure connection</p></div><div id="live-status" class="live-status">Offline</div></div>
-    <div id="pilot-list"><div class="empty">Sign in to view pilots who opted into public live tracking.</div></div>
+    <div class="panel-header"><div><h2 id="pilots-title">Live pilots</h2><p id="last-refresh">Loading public locations</p></div><div id="live-status" class="live-status">Connecting</div></div>
+    <div id="pilot-list"><div class="empty">Loading pilots who opted into public live tracking…</div></div>
     <div class="panel-footer">Only pilots who enabled public sharing appear here. Positions are refreshed every 15 seconds.</div>
   </aside>
-  <div id="auth-backdrop" class="auth-backdrop">
-    <section class="auth-card" aria-labelledby="auth-title">
-      <div class="eyebrow">Secure map access</div>
-      <h2 id="auth-title">Enter the live map</h2>
-      <p>Sign in to view currently shared pilot locations. Your access and refresh tokens remain in this page's memory only.</p>
-      <form id="login-form">
-        <label>Username or email<input id="identifier" name="identifier" autocomplete="username" required></label>
-        <label>Password<input id="password" name="password" type="password" autocomplete="current-password" required></label>
-        <button id="login-button" class="button" type="submit">Sign in and load map</button>
-        <div id="login-notice" class="notice" role="status" aria-live="polite"></div>
-      </form>
-    </section>
-  </div>
+  <script src="/assets/auth.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const WORLD_BOUNDS = { west: -180, south: -85.05112878, east: 180, north: 85.05112878 };
     const REFRESH_MS = 15000;
-    let accessToken = "";
     let refreshTimer = 0;
     let map;
     let locations = [];
@@ -114,11 +101,9 @@
     const ageSeconds = (value) => Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
     const formatAge = (value) => { const seconds = ageSeconds(value); return seconds < 60 ? `${seconds}s ago` : `${Math.floor(seconds / 60)}m ago`; };
     const setStatus = (message, error = false) => { $("live-status").textContent = message; $("live-status").className = `live-status${error ? " error" : ""}`; };
-    const setLoginNotice = (message, error = false) => { $("login-notice").textContent = message; $("login-notice").className = `notice${error ? " error" : ""}`; };
     const api = async (path, options = {}) => {
-      const headers = new Headers(options.headers || {});
+      const headers = window.ParaBeaconAuth ? window.ParaBeaconAuth.authHeaders(options.headers || {}) : new Headers(options.headers || {});
       headers.set("Accept", "application/json");
-      if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
       const response = await fetch(path, { ...options, headers, cache: "no-store" });
       let body = {};
       try { body = await response.json(); } catch (_) {}
@@ -196,49 +181,17 @@
         setStatus("Live", false);
       } catch (error) {
         if (sequence !== refreshSequence) return;
-        setStatus(error.message === "unauthorized" ? "Signed out" : "Unavailable", true);
+        setStatus("Unavailable", true);
         $("last-refresh").textContent = "The map could not be refreshed";
-        if (error.message === "unauthorized") signOut();
       }
     };
     const startLiveMap = async () => {
-      $("auth-backdrop").hidden = true;
-      $("logout").hidden = false;
       if (!map) initMap();
       await refreshLocations(true);
       window.clearInterval(refreshTimer);
       refreshTimer = window.setInterval(() => refreshLocations(false), REFRESH_MS);
     };
-    const signOut = () => {
-      accessToken = "";
-      window.clearInterval(refreshTimer);
-      refreshTimer = 0;
-      locations = [];
-      selectedKey = "";
-      markers.forEach((marker) => marker.remove());
-      markers = new Map();
-      renderList();
-      $("logout").hidden = true;
-      $("auth-backdrop").hidden = false;
-      $("password").value = "";
-      setStatus("Offline");
-      $("last-refresh").textContent = "Waiting for a secure connection";
-    };
-    $("login-form").addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const button = $("login-button");
-      button.disabled = true;
-      setLoginNotice("Signing in…");
-      try {
-        const body = await fetch("/api/v1/auth/login", { method:"POST", headers:{ "Content-Type":"application/json", "Accept":"application/json" }, body:JSON.stringify({ identifier:$("identifier").value.trim(), password:$("password").value }) }).then(async (response) => { let payload = {}; try { payload = await response.json(); } catch (_) {} if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`); return payload; });
-        if (!body.access_token) throw new Error("The server did not return an access token");
-        accessToken = body.access_token;
-        setLoginNotice("");
-        await startLiveMap();
-      } catch (error) { accessToken = ""; setLoginNotice(error.message, true); } finally { button.disabled = false; }
-    });
-    $("logout").addEventListener("click", signOut);
-    if (window.L) initMap(); else setStatus("Map unavailable", true);
+    if (window.L) { initMap(); startLiveMap(); } else setStatus("Map unavailable", true);
   </script>
 </body>
 </html>

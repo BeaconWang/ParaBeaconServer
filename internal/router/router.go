@@ -30,15 +30,18 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	if err != nil {
 		return nil, err
 	}
+	homePage := gin.WrapH(webapp.HomeHandler())
 	releasePage := gin.WrapH(webapp.Handler())
 	livePage := gin.WrapH(webapp.LiveHandler())
-	engine.GET("/", func(c *gin.Context) {
-		c.Redirect(http.StatusFound, "/release")
-	})
+	authScript := gin.WrapH(webapp.AuthScriptHandler())
+	engine.GET("/", homePage)
+	engine.GET("/home", homePage)
+	engine.GET("/home/", homePage)
 	engine.GET("/release", releasePage)
 	engine.GET("/release/", releasePage)
 	engine.GET("/live", livePage)
 	engine.GET("/live/", livePage)
+	engine.GET("/assets/auth.js", authScript)
 	engine.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
@@ -82,11 +85,12 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		v1.DELETE("/admin/app/releases/:version_code", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Delete)
 		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Publish)
 
+		v1.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), trackingHandler.ListPublicLocations)
+
 		protected := v1.Group("")
 		protected.Use(middleware.RequireAuth(tokens))
 		protected.GET("/user/profile", userHandler.Profile)
 		protected.GET("/tracking", trackingHandler.ListActive)
-		protected.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), trackingHandler.ListPublicLocations)
 		protected.POST("/tracking/sessions", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), trackingHandler.Start)
 		protected.POST("/tracking/sessions/:session_id/points", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), trackingHandler.AddPoints)
 		protected.PATCH("/tracking/sessions/:session_id/public-sharing", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), trackingHandler.SetPublicSharing)

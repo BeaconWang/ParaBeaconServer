@@ -108,6 +108,21 @@ func TestListPublicLocationsRequiresBoundsAndReturnsOnlyMapFields(t *testing.T) 
 	}
 }
 
+func TestListPublicLocationsAllowsAnonymousRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &trackingHandlerTestService{}
+	engine := gin.New()
+	engine.GET("/map/active-locations", NewTrackingHandler(service).ListPublicLocations)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/map/active-locations?west=8&south=47&east=9&north=48", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if service.userID != uuid.Nil {
+		t.Fatalf("anonymous requester id = %s, want nil UUID", service.userID)
+	}
+}
+
 func TestListPublicLocationsRejectsInvalidBoundsAndCursor(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()

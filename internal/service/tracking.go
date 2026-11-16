@@ -89,8 +89,7 @@ func (s *TrackingService) SetPublicSharing(ctx context.Context, userID, sessionI
 }
 
 func (s *TrackingService) ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error) {
-	if userID == uuid.Nil ||
-		!finiteInRange(south, -90, 90) ||
+	if !finiteInRange(south, -90, 90) ||
 		!finiteInRange(north, -90, 90) ||
 		!finiteInRange(west, -180, 180) ||
 		!finiteInRange(east, -180, 180) ||

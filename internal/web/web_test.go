@@ -38,3 +38,35 @@ func TestLiveHandlerServesLiveMapWithSecurityPolicy(t *testing.T) {
 		t.Fatal("live page does not contain its title")
 	}
 }
+
+func TestAuthScriptHandlerServesJavaScript(t *testing.T) {
+	request := httptest.NewRequest("GET", "/assets/auth.js", nil)
+	response := httptest.NewRecorder()
+	AuthScriptHandler().ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/javascript; charset=utf-8" {
+		t.Fatalf("content type = %q", got)
+	}
+	if !strings.Contains(response.Body.String(), "ParaBeaconAuth") {
+		t.Fatal("auth script does not expose the shared auth API")
+	}
+}
+
+func TestHomeHandlerServesGuideWithSecurityPolicy(t *testing.T) {
+	request := httptest.NewRequest("GET", "/", nil)
+	response := httptest.NewRecorder()
+	HomeHandler().ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Security-Policy"); got == "" {
+		t.Fatal("home page has no content security policy")
+	}
+	for _, marker := range []string{"ParaBeacon", "Live tracking map", "Release console"} {
+		if !strings.Contains(response.Body.String(), marker) {
+			t.Errorf("home page does not contain %q", marker)
+		}
+	}
+}
