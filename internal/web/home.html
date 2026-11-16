@@ -9,17 +9,18 @@
     :root { color-scheme:dark; --bg:#08101f; --panel:#111d31dd; --panel-strong:#152641; --line:#2b4161; --muted:#9aaac4; --text:#f1f6ff; --accent:#68e5bf; --accent-2:#8ca5ff; --warm:#ffca80; }
     * { box-sizing:border-box; }
     html { min-height:100%; }
-    body { min-height:100vh; margin:0; color:var(--text); background:radial-gradient(circle at 78% -12%, #2d4f87 0, transparent 34rem), radial-gradient(circle at 0 55%, #123554 0, transparent 28rem), var(--bg); font:15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { min-height:100dvh; margin:0; color:var(--text); background:radial-gradient(circle at 78% -12%, #2d4f87 0, transparent 34rem), radial-gradient(circle at 0 55%, #123554 0, transparent 28rem), var(--bg); font:15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     a { color:inherit; }
-    .shell { width:min(1160px, calc(100% - 40px)); margin:0 auto; padding:24px 0 48px; }
+    .shell { display:flex; width:min(1160px, calc(100% - 40px)); min-height:100dvh; margin:0 auto; flex-direction:column; padding:24px 0 48px; }
     .topbar { display:flex; align-items:center; justify-content:space-between; gap:24px; }
     .brand { display:flex; align-items:center; gap:12px; text-decoration:none; }
     .brand-mark { display:grid; place-items:center; width:42px; height:42px; border:1px solid #b6ffe733; border-radius:14px; color:#06131a; background:var(--accent); box-shadow:0 0 28px #68e5bf33; font-size:13px; font-weight:900; }
     .brand-name { font-size:17px; font-weight:850; letter-spacing:-.02em; }
     .brand-caption { color:var(--muted); font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
-    nav { display:flex; align-items:center; gap:8px; }
-    nav a, .button { border:1px solid var(--line); border-radius:11px; padding:10px 14px; color:var(--text); background:#14233bdd; font-weight:800; text-decoration:none; transition:transform .15s, border-color .15s, filter .15s; }
-    nav a:hover, .button:hover { border-color:#7b9cff; filter:brightness(1.08); transform:translateY(-1px); }
+    nav { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .language-toggle { min-width:78px; }
+    nav a, nav button, .button { border:1px solid var(--line); border-radius:11px; padding:10px 14px; color:var(--text); background:#14233bdd; font:inherit; font-weight:800; text-decoration:none; cursor:pointer; transition:transform .15s, border-color .15s, filter .15s; }
+    nav a:hover, nav button:hover, .button:hover { border-color:#7b9cff; filter:brightness(1.08); transform:translateY(-1px); }
     nav a.primary, .button.primary { border-color:transparent; color:#06131a; background:var(--accent); }
     .hero { display:grid; grid-template-columns:minmax(0, 1.15fr) minmax(300px, .85fr); gap:64px; align-items:center; padding:92px 0 82px; }
     .eyebrow { color:var(--accent); font-size:12px; font-weight:850; letter-spacing:.18em; text-transform:uppercase; }
@@ -75,46 +76,47 @@
     }
   </style>
 </head>
-<body>
+<body data-page-title="homeTitle" data-i18n-shared="true">
   <main class="shell">
     <header class="topbar">
-      <a class="brand" href="/" aria-label="ParaBeacon home"><span class="brand-mark">PB</span><span><span class="brand-name">ParaBeacon</span><span class="brand-caption">Flight operations</span></span></a>
-      <nav aria-label="Primary navigation"><a href="/live">Live map</a><a class="primary" href="/release">Release console</a><span data-auth-widget></span></nav>
+      <a class="brand" href="/" data-i18n-aria-label="paraBeaconHome"><span class="brand-mark">PB</span><span><span class="brand-name">ParaBeacon</span><span class="brand-caption" data-i18n="brandCaption">Flight operations</span></span></a>
+      <nav data-i18n-aria-label="navPrimary"><a href="/live" data-i18n="liveHome">Live map</a><a class="primary" href="/release" data-i18n="liveRelease">Release console</a><button class="language-toggle" type="button" data-language-toggle>中文</button><span data-auth-widget></span></nav>
     </header>
 
     <section class="hero" aria-labelledby="hero-title">
       <div>
-        <div class="eyebrow">A clearer view of every flight</div>
-        <h1 id="hero-title">Fly informed.<br>Stay connected.</h1>
-        <p class="hero-copy">ParaBeacon brings public live tracking and pilot-ready Android releases into one focused operations hub.</p>
-        <div class="hero-actions"><a class="button primary" href="/live">Explore live flights <span aria-hidden="true">→</span></a><a class="button" href="/release">Manage releases</a></div>
-        <div class="hero-note">Secure access · privacy-first sharing · built for pilots</div>
+        <div class="eyebrow" data-i18n="homeEyebrow">A clearer view of every flight</div>
+        <h1 id="hero-title" data-i18n="homeHeroTitle">Fly informed. Stay connected.</h1>
+        <p class="hero-copy" data-i18n="homeHeroCopy">ParaBeacon brings public live tracking and pilot-ready Android releases into one focused operations hub.</p>
+        <div class="hero-actions"><a class="button primary" href="/live"><span data-i18n="homeLiveAction">Explore live flights</span> <span aria-hidden="true">→</span></a><a class="button" href="/release" data-i18n="homeReleaseAction">Manage releases</a></div>
+        <div class="hero-note" data-i18n="homeSecureNote">Secure access · privacy-first sharing · built for pilots</div>
       </div>
       <div class="radar" aria-label="Illustration of live flight tracking" role="img"><span class="radar-sweep"></span><span class="radar-pip pip-one"></span><span class="radar-pip pip-two"></span><span class="radar-pip pip-three"></span><span class="radar-core">PB</span></div>
     </section>
 
     <section aria-labelledby="destinations-title">
-      <div class="section-heading"><h2 id="destinations-title">Choose a starting point</h2><p>Use the tools you need now, then return here whenever you need the wider picture.</p></div>
+      <div class="section-heading"><h2 id="destinations-title" data-i18n="homeChoose">Choose a starting point</h2><p data-i18n="homeChooseCopy">Use the tools you need now, then return here whenever you need the wider picture.</p></div>
       <div class="cards">
         <article class="card">
-          <div><div class="card-icon" aria-hidden="true">↗</div><h3>Live tracking map</h3><p>See every currently shared pilot on a world map without signing in. Inspect position, heading, freshness, and last observation time.</p></div>
-          <a class="card-link" href="/live">Open live map <span class="arrow" aria-hidden="true">→</span></a>
+          <div><div class="card-icon" aria-hidden="true">↗</div><h3 data-i18n="homeLiveTitle">Live tracking map</h3><p data-i18n="homeLiveCopy">See every currently shared pilot on a world map without signing in. Inspect position, heading, freshness, and last observation time.</p></div>
+          <a class="card-link" href="/live"><span data-i18n="homeLiveAction">Open live map</span> <span class="arrow" aria-hidden="true">→</span></a>
         </article>
         <article class="card release">
-          <div><div class="card-icon" aria-hidden="true">▣</div><h3>Release console</h3><p>Publish signed Android builds, review release history, inspect checksums, and keep the latest package ready for pilots.</p></div>
-          <a class="card-link" href="/release">Open release console <span class="arrow" aria-hidden="true">→</span></a>
+          <div><div class="card-icon" aria-hidden="true">▣</div><h3 data-i18n="homeReleaseTitle">Release console</h3><p data-i18n="homeReleaseCopy">Publish signed Android builds, review release history, inspect checksums, and keep the latest package ready for pilots.</p></div>
+          <a class="card-link" href="/release"><span data-i18n="homeReleaseAction">Open release console</span> <span class="arrow" aria-hidden="true">→</span></a>
         </article>
       </div>
     </section>
 
     <section class="steps" aria-label="How to use ParaBeacon">
-      <article class="step"><div class="step-number">01 / WATCH</div><h3>Open the live map</h3><p>View opt-in public locations immediately; sign in only when you need account access.</p></article>
-      <article class="step"><div class="step-number">02 / PREPARE</div><h3>Choose a release</h3><p>Use the release console to keep your Android client on a verified build.</p></article>
-      <article class="step"><div class="step-number">03 / FLY</div><h3>Share intentionally</h3><p>Public sharing is opt-in and can be revoked by the pilot at any time.</p></article>
+      <article class="step"><div class="step-number">01 / <span data-i18n="homeWatch">WATCH</span></div><h3 data-i18n="homeWatchTitle">Open the live map</h3><p data-i18n="homeWatchCopy">View opt-in public locations immediately; sign in only when you need account access.</p></article>
+      <article class="step"><div class="step-number">02 / <span data-i18n="homePrepare">PREPARE</span></div><h3 data-i18n="homePrepareTitle">Choose a release</h3><p data-i18n="homePrepareCopy">Use the release console to keep your Android client on a verified build.</p></article>
+      <article class="step"><div class="step-number">03 / <span data-i18n="homeFly">FLY</span></div><h3 data-i18n="homeFlyTitle">Share intentionally</h3><p data-i18n="homeFlyCopy">Public sharing is opt-in and can be revoked by the pilot at any time.</p></article>
     </section>
 
-    <footer><span>ParaBeacon · Flight operations hub</span><span><a href="/healthz">System status</a> · <a href="/live">Live map</a></span></footer>
+    <footer><span data-i18n="homeFooter">ParaBeacon · Flight operations hub</span><span><a href="/healthz" data-i18n="status">System status</a> · <a href="/live" data-i18n="liveHome">Live map</a></span></footer>
   </main>
+  <script src="/assets/i18n.js"></script>
   <script src="/assets/auth.js"></script>
 </body>
 </html>

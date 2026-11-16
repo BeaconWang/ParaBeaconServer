@@ -41,6 +41,7 @@
     return result;
   };
   const emitChange = () => window.dispatchEvent(new CustomEvent("parabeacon-auth-changed"));
+  const translate = (key, values = {}) => window.ParaBeaconI18n ? window.ParaBeaconI18n.t(key, values) : key;
   const setNotice = (element, message, error = false) => {
     element.textContent = message;
     element.className = `pb-auth-notice${error ? " error" : ""}`;
@@ -81,7 +82,7 @@
     const trigger = document.createElement("button");
     trigger.type = "button";
     trigger.className = "pb-auth-trigger";
-    trigger.textContent = "Sign in";
+    trigger.textContent = translate("authSignIn");
     const account = document.createElement("button");
     account.type = "button";
     account.className = "pb-auth-account";
@@ -89,12 +90,13 @@
     const signout = document.createElement("button");
     signout.type = "button";
     signout.className = "pb-auth-signout";
-    signout.textContent = "Sign out";
+    signout.textContent = translate("authSignOut");
     signout.hidden = true;
     const modal = document.createElement("div");
     modal.className = "pb-auth-modal";
     modal.hidden = true;
-    modal.innerHTML = `<section class="pb-auth-dialog" role="dialog" aria-modal="true" aria-labelledby="pb-auth-title"><button class="pb-auth-close" type="button" aria-label="Close sign-in dialog">×</button><h2 id="pb-auth-title">Sign in to ParaBeacon</h2><p>Your account lets protected tools recognize you across this browser tab. The live map remains publicly viewable without signing in.</p><form class="pb-auth-form"><label>Username or email<input name="identifier" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button type="submit">Sign in</button><div class="pb-auth-notice" role="status" aria-live="polite"></div></form></section>`;
+    modal.innerHTML = `<section class="pb-auth-dialog" role="dialog" aria-modal="true" aria-labelledby="pb-auth-title"><button class="pb-auth-close" type="button" data-i18n-aria-label="authClose">×</button><h2 id="pb-auth-title" data-i18n="authTitle"></h2><p data-i18n="authDescription"></p><form class="pb-auth-form"><label><span data-i18n="authIdentifier"></span><input name="identifier" autocomplete="username" required></label><label><span data-i18n="authPassword"></span><input name="password" type="password" autocomplete="current-password" required></label><button type="submit" data-i18n="authSubmit"></button><div class="pb-auth-notice" role="status" aria-live="polite"></div></form></section>`;
+    if (window.ParaBeaconI18n) window.ParaBeaconI18n.apply(modal);
     root.className = "pb-auth";
     root.append(trigger, account, signout, modal);
     const form = modal.querySelector("form");
@@ -105,7 +107,10 @@
       trigger.hidden = signedIn;
       account.hidden = !signedIn;
       signout.hidden = !signedIn;
-      account.textContent = getUser() || "Signed in";
+      trigger.textContent = translate("authSignIn");
+      account.textContent = getUser() || translate("authSignedIn");
+      signout.textContent = translate("authSignOut");
+      if (window.ParaBeaconI18n) window.ParaBeaconI18n.apply(modal);
     };
     trigger.addEventListener("click", open);
     account.addEventListener("click", open);
@@ -118,13 +123,13 @@
       const submit = form.querySelector("button[type=submit]");
       const notice = form.querySelector(".pb-auth-notice");
       submit.disabled = true;
-      setNotice(notice, "Signing in…");
+      setNotice(notice, translate("authSigningIn"));
       try {
         const response = await fetch("/api/v1/auth/login", { method:"POST", headers:{ "Content-Type":"application/json", "Accept":"application/json" }, body:JSON.stringify({ identifier:form.elements.identifier.value.trim(), password:form.elements.password.value }) });
         let body = {};
         try { body = await response.json(); } catch (_) {}
         if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
-        if (!body.access_token) throw new Error("The server did not return an access token");
+        if (!body.access_token) throw new Error(translate("authTokenMissing"));
         setSession(body.access_token, body.user && body.user.username ? body.user.username : "Signed in");
         form.reset();
         close();
@@ -137,6 +142,7 @@
       }
     });
     update();
+    window.addEventListener("parabeacon-language-changed", update);
   };
 
   window.ParaBeaconAuth = { getToken, authHeaders, init, logout: () => { clearSession(); emitChange(); } };

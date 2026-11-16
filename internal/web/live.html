@@ -9,7 +9,7 @@
   <style>
     :root { color-scheme: dark; --bg:#07101e; --panel:#101b2c; --panel-strong:#0c1728ee; --line:#2a3b57; --muted:#9eacc4; --text:#f2f6ff; --accent:#66e4bd; --accent-2:#8aa4ff; --danger:#ff9cab; --shadow:0 20px 70px #0008; }
     * { box-sizing:border-box; }
-    html, body { width:100%; height:100%; margin:0; overflow:hidden; color:var(--text); background:var(--bg); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    html, body { width:100%; height:100%; min-height:100dvh; margin:0; overflow:hidden; color:var(--text); background:var(--bg); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     button, input { font:inherit; }
     button { cursor:pointer; }
     #map { position:fixed; inset:0; background:#b6c6d7; }
@@ -23,7 +23,8 @@
     .brand-mark { display:grid; place-items:center; width:34px; height:34px; border-radius:11px; color:#06131a; background:var(--accent); font-weight:900; }
     .eyebrow { color:var(--accent); font-size:11px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
     h1 { margin:1px 0 0; font-size:20px; line-height:1.1; letter-spacing:-.03em; }
-    .topbar-actions { display:flex; align-items:center; gap:8px; }
+    .topbar-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .language-toggle { border:1px solid var(--line); border-radius:10px; padding:9px 13px; color:var(--text); background:#1b2a43; font:inherit; font-weight:800; cursor:pointer; }
     .button { border:1px solid transparent; border-radius:10px; padding:9px 13px; color:#06131a; background:var(--accent); font-weight:800; }
     .button:hover { filter:brightness(1.08); }
     .button.secondary { color:var(--text); background:#1b2a43; border-color:var(--line); text-decoration:none; }
@@ -60,34 +61,37 @@
     [hidden] { display:none !important; }
     @media (max-width:700px) {
       .topbar { top:10px; left:10px; right:10px; min-height:56px; padding:9px 10px 9px 12px; }
+      .topbar-actions { gap:5px; }
       .brand-mark { width:30px; height:30px; }
       h1 { font-size:17px; }
       .brand .eyebrow { display:none; }
       .topbar-actions .button.secondary { display:none; }
-      .panel { top:auto; right:10px; bottom:10px; left:10px; width:auto; height:min(43vh, 360px); }
+      .panel { top:auto; right:10px; bottom:10px; left:10px; width:auto; height:min(43dvh, 360px); }
       .panel-header { padding:15px 16px 12px; }
       #pilot-list { padding:6px; }
       .panel-footer { padding:10px 16px 12px; }
     }
   </style>
 </head>
-<body>
-  <div id="map" aria-label="Live tracking map"></div>
+<body data-page-title="livePageTitle" data-i18n-shared="true">
+  <div id="map" data-i18n-aria-label="liveHeading"></div>
   <header class="topbar">
-    <div class="brand"><div class="brand-mark" aria-hidden="true">PB</div><div><div class="eyebrow">ParaBeacon / Live</div><h1>Public flight tracking</h1></div></div>
-    <div class="topbar-actions"><a class="button secondary" href="/">Home</a><a class="button secondary" href="/release">Release console</a><span data-auth-widget></span></div>
+    <div class="brand"><div class="brand-mark" aria-hidden="true">PB</div><div><div class="eyebrow" data-i18n="liveEyebrow">ParaBeacon / Live</div><h1 data-i18n="liveHeading">Public flight tracking</h1></div></div>
+    <div class="topbar-actions"><a class="button secondary" href="/" data-i18n="liveHome">Home</a><a class="button secondary" href="/release" data-i18n="liveRelease">Release console</a><button class="language-toggle" type="button" data-language-toggle>中文</button><span data-auth-widget></span></div>
   </header>
   <aside class="panel" aria-labelledby="pilots-title">
-    <div class="panel-header"><div><h2 id="pilots-title">Live pilots</h2><p id="last-refresh">Loading public locations</p></div><div id="live-status" class="live-status">Connecting</div></div>
-    <div id="pilot-list"><div class="empty">Loading pilots who opted into public live tracking…</div></div>
-    <div class="panel-footer">Only pilots who enabled public sharing appear here. Positions are refreshed every 15 seconds.</div>
+    <div class="panel-header"><div><h2 id="pilots-title" data-i18n="livePilots">Live pilots</h2><p id="last-refresh" data-i18n="liveLoading">Loading public locations</p></div><div id="live-status" class="live-status" data-i18n="liveConnecting">Connecting</div></div>
+    <div id="pilot-list"><div class="empty" data-i18n="liveLoadingPilots">Loading pilots who opted into public live tracking…</div></div>
+    <div class="panel-footer" data-i18n="liveFooter">Only pilots who enabled public sharing appear here. Positions are refreshed every 15 seconds.</div>
   </aside>
+  <script src="/assets/i18n.js"></script>
   <script src="/assets/auth.js"></script>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     const WORLD_BOUNDS = { west: -180, south: -85.05112878, east: 180, north: 85.05112878 };
     const REFRESH_MS = 15000;
+    const t = (key, values = {}) => window.ParaBeaconI18n ? window.ParaBeaconI18n.t(key, values) : key;
     let refreshTimer = 0;
     let map;
     let locations = [];
@@ -97,9 +101,9 @@
 
     const escapeHTML = (value) => String(value ?? "").replace(/[&<>\"']/g, (character) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[character]));
     const formatNumber = (value, digits = 4) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
-    const formatDate = (value) => { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(undefined, { dateStyle:"medium", timeStyle:"short" }); };
+    const formatDate = (value) => { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(window.ParaBeaconI18n && window.ParaBeaconI18n.getLanguage() === "zh" ? "zh-CN" : undefined, { dateStyle:"medium", timeStyle:"short" }); };
     const ageSeconds = (value) => Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
-    const formatAge = (value) => { const seconds = ageSeconds(value); return seconds < 60 ? `${seconds}s ago` : `${Math.floor(seconds / 60)}m ago`; };
+    const formatAge = (value) => { const seconds = ageSeconds(value); return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m`; };
     const setStatus = (message, error = false) => { $("live-status").textContent = message; $("live-status").className = `live-status${error ? " error" : ""}`; };
     const api = async (path, options = {}) => {
       const headers = window.ParaBeaconAuth ? window.ParaBeaconAuth.authHeaders(options.headers || {}) : new Headers(options.headers || {});
@@ -115,7 +119,7 @@
       const rotation = Number.isFinite(Number(heading)) ? Number(heading) : 0;
       return L.divIcon({ className: "pilot-marker", html: `<div style="width:34px;height:34px;display:grid;place-items:center;border:2px solid #07101e;border-radius:50%;color:#06131a;background:#66e4bd;box-shadow:0 3px 12px #0008;transform:rotate(${rotation}deg);font-size:17px;font-weight:900">▲</div>`, iconSize:[34,34], iconAnchor:[17,17] });
     };
-    const popupHTML = (location) => `<strong>${escapeHTML(location.pilot_name || "Unknown pilot")}</strong><br>Latitude: ${formatNumber(location.lat)}<br>Longitude: ${formatNumber(location.lon)}<br>Heading: ${Number.isFinite(Number(location.heading)) ? `${formatNumber(location.heading, 0)}°` : "Not reported"}<br>Observed: ${escapeHTML(formatDate(location.observed_at))}`;
+    const popupHTML = (location) => `<strong>${escapeHTML(location.pilot_name || t("liveUnknownPilot"))}</strong><br>${t("liveLatitude")}: ${formatNumber(location.lat)}<br>${t("liveLongitude")}: ${formatNumber(location.lon)}<br>${t("liveHeadingLabel")}: ${Number.isFinite(Number(location.heading)) ? `${formatNumber(location.heading, 0)}°` : t("liveNotReported")}<br>${t("liveObserved")}: ${escapeHTML(formatDate(location.observed_at))}`;
     const initMap = () => {
       map = L.map("map", { zoomControl: false, worldCopyJump: true }).setView([20, 0], 2);
       L.control.zoom({ position: "bottomleft" }).addTo(map);
@@ -156,14 +160,14 @@
     const focusPilot = (location, key) => { selectedKey = key; map.setView([location.lat, location.lon], Math.max(map.getZoom(), 9), { animate: true }); const marker = markers.get(key); if (marker) marker.openPopup(); renderList(); };
     const renderList = () => {
       const list = $("pilot-list");
-      if (!locations.length) { list.innerHTML = '<div class="empty">No public live pilots were found in the latest update.</div>'; return; }
+      if (!locations.length) { list.textContent = ""; const empty = document.createElement("div"); empty.className = "empty"; empty.textContent = t("liveEmpty"); list.append(empty); return; }
       list.replaceChildren(...locations.map((location) => {
         const key = locationKey(location);
         const card = document.createElement("button");
         card.type = "button";
         card.className = `pilot-card${key === selectedKey ? " selected" : ""}`;
         const age = ageSeconds(location.observed_at);
-        card.innerHTML = `<span class="pilot-icon" aria-hidden="true">▲</span><span><span class="pilot-name"></span><span class="pilot-meta">${Number.isFinite(Number(location.heading)) ? `Heading ${formatNumber(location.heading, 0)}°` : "Heading not reported"} · <span class="pilot-age">${escapeHTML(formatAge(location.observed_at))}</span></span><span class="pilot-coordinates">${formatNumber(location.lat)}, ${formatNumber(location.lon)}</span></span><span class="pilot-age">${age < 90 ? "LIVE" : "STALE"}</span>`;
+        card.innerHTML = `<span class="pilot-icon" aria-hidden="true">▲</span><span><span class="pilot-name"></span><span class="pilot-meta">${Number.isFinite(Number(location.heading)) ? escapeHTML(t("liveHeadingValue", { value: formatNumber(location.heading, 0) })) : t("liveHeadingMissing")} · <span class="pilot-age">${escapeHTML(formatAge(location.observed_at))}</span></span><span class="pilot-coordinates">${formatNumber(location.lat)}, ${formatNumber(location.lon)}</span></span><span class="pilot-age">${age < 90 ? t("liveNow") : t("liveStale")}</span>`;
         card.querySelector(".pilot-name").textContent = location.pilot_name || "Unknown pilot";
         card.addEventListener("click", () => focusPilot(location, key));
         return card;
@@ -177,12 +181,12 @@
         locations = next;
         renderMarkers(fitMap);
         renderList();
-        $("last-refresh").textContent = `Updated ${new Date().toLocaleTimeString()} · ${locations.length} public pilot${locations.length === 1 ? "" : "s"}`;
-        setStatus("Live", false);
+        $("last-refresh").textContent = t("liveUpdated", { time: new Date().toLocaleTimeString(), count: locations.length, plural: locations.length === 1 ? t("liveSingular") : t("livePlural") });
+        setStatus(t("liveNow"), false);
       } catch (error) {
         if (sequence !== refreshSequence) return;
-        setStatus("Unavailable", true);
-        $("last-refresh").textContent = "The map could not be refreshed";
+        setStatus(t("liveUnavailable"), true);
+        $("last-refresh").textContent = t("liveRefreshFailed");
       }
     };
     const startLiveMap = async () => {
@@ -191,7 +195,8 @@
       window.clearInterval(refreshTimer);
       refreshTimer = window.setInterval(() => refreshLocations(false), REFRESH_MS);
     };
-    if (window.L) { initMap(); startLiveMap(); } else setStatus("Map unavailable", true);
+    window.addEventListener("parabeacon-language-changed", () => { renderList(); markers.forEach((marker, key) => { const location = locations.find((item) => locationKey(item) === key); if (location) marker.bindPopup(popupHTML(location)); }); if (locations.length) $("last-refresh").textContent = t("liveUpdated", { time: new Date().toLocaleTimeString(), count: locations.length, plural: locations.length === 1 ? t("liveSingular") : t("livePlural") }); else setStatus(t("liveEmpty")); });
+    if (window.L) { initMap(); startLiveMap(); } else setStatus(t("liveMapUnavailable"), true);
   </script>
 </body>
 </html>

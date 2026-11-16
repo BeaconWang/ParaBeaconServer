@@ -33,6 +33,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	homePage := gin.WrapH(webapp.HomeHandler())
 	releasePage := gin.WrapH(webapp.Handler())
 	livePage := gin.WrapH(webapp.LiveHandler())
+	i18nScript := gin.WrapH(webapp.I18nScriptHandler())
 	authScript := gin.WrapH(webapp.AuthScriptHandler())
 	engine.GET("/", homePage)
 	engine.GET("/home", homePage)
@@ -41,6 +42,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	engine.GET("/release/", releasePage)
 	engine.GET("/live", livePage)
 	engine.GET("/live/", livePage)
+	engine.GET("/assets/i18n.js", i18nScript)
 	engine.GET("/assets/auth.js", authScript)
 	engine.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})

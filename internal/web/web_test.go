@@ -39,6 +39,21 @@ func TestLiveHandlerServesLiveMapWithSecurityPolicy(t *testing.T) {
 	}
 }
 
+func TestI18nScriptHandlerServesJavaScript(t *testing.T) {
+	request := httptest.NewRequest("GET", "/assets/i18n.js", nil)
+	response := httptest.NewRecorder()
+	I18nScriptHandler().ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/javascript; charset=utf-8" {
+		t.Fatalf("content type = %q", got)
+	}
+	if !strings.Contains(response.Body.String(), "parabeacon-language") {
+		t.Fatal("i18n script does not persist the language preference")
+	}
+}
+
 func TestAuthScriptHandlerServesJavaScript(t *testing.T) {
 	request := httptest.NewRequest("GET", "/assets/auth.js", nil)
 	response := httptest.NewRecorder()

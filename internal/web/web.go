@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-//go:embed auth.js home.html index.html live.html
+//go:embed auth.js home.html i18n.js index.html live.html
 var files embed.FS
 
 func pageHandler(filename string) http.Handler {
@@ -41,12 +41,12 @@ func LiveHandler() http.Handler {
 	return pageHandler("live.html")
 }
 
-func AuthScriptHandler() http.Handler {
+func scriptHandler(filename string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
 		w.Header().Set("Pragma", "no-cache")
 		w.Header().Set("Expires", "0")
-		content, err := files.ReadFile("auth.js")
+		content, err := files.ReadFile(filename)
 		if err != nil {
 			http.Error(w, "asset unavailable", http.StatusInternalServerError)
 			return
@@ -54,4 +54,12 @@ func AuthScriptHandler() http.Handler {
 		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 		_, _ = w.Write(content)
 	})
+}
+
+func I18nScriptHandler() http.Handler {
+	return scriptHandler("i18n.js")
+}
+
+func AuthScriptHandler() http.Handler {
+	return scriptHandler("auth.js")
 }

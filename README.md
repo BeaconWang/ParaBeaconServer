@@ -90,7 +90,7 @@ Fetch public pilot locations within a WGS-84 viewport using public or authentica
 
 ### Web pages
 
-Open `/` for the ParaBeacon home page. It provides the primary navigation, account sign-in, and short guides to the live map and release console. `/home` and `/home/` serve the same page. The account widget is also available on the other web pages; it keeps only the short-lived access token in `sessionStorage` for the current browser tab and does not store a refresh token.
+Open `/` for the ParaBeacon home page. It provides the primary navigation, account sign-in, and short guides to the live map and release console. `/home` and `/home/` serve the same page. The account widget is also available on the other web pages; it keeps only the short-lived access token in `sessionStorage` for the current browser tab and does not store a refresh token. Home and live pages default to the browser language when no preference exists and provide a manual English/Chinese switch; the selected language is saved under `parabeacon-language`.
 
 Open `/live` for the public full-screen map; signing in is optional. It loads every cursor page of publicly shared active pilots and refreshes the map every 15 seconds. The panel shows each returned pilot name, coordinates, heading when available, observation time, and freshness status; the page intentionally does not expose altitude or other private telemetry because the public API contract excludes those fields. The authenticated public-map API also includes the signed-in user's own opted-in session; anonymous requests include all opted-in sessions.
 
