@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -20,5 +21,20 @@ func TestHandlerDisablesCaching(t *testing.T) {
 		if got := response.Header().Get(header); got != want {
 			t.Errorf("%s = %q, want %q", header, got, want)
 		}
+	}
+}
+
+func TestLiveHandlerServesLiveMapWithSecurityPolicy(t *testing.T) {
+	request := httptest.NewRequest("GET", "/live", nil)
+	response := httptest.NewRecorder()
+	LiveHandler().ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Security-Policy"); got == "" {
+		t.Fatal("live page has no content security policy")
+	}
+	if !strings.Contains(response.Body.String(), "Public flight tracking") {
+		t.Fatal("live page does not contain its title")
 	}
 }

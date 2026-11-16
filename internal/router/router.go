@@ -30,12 +30,15 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	if err != nil {
 		return nil, err
 	}
-	releasePage := gin.WrapH(http.StripPrefix("/release", webapp.Handler()))
+	releasePage := gin.WrapH(webapp.Handler())
+	livePage := gin.WrapH(webapp.LiveHandler())
 	engine.GET("/", func(c *gin.Context) {
 		c.Redirect(http.StatusFound, "/release")
 	})
 	engine.GET("/release", releasePage)
 	engine.GET("/release/", releasePage)
+	engine.GET("/live", livePage)
+	engine.GET("/live/", livePage)
 	engine.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})

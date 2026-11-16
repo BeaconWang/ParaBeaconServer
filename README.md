@@ -88,6 +88,10 @@ Upload batches to `POST /api/v1/tracking/sessions/{session_id}/points` with `{"s
 
 Fetch public pilot locations within a WGS-84 viewport using authenticated `GET /api/v1/map/active-locations?west=…&south=…&east=…&north=…`. Bounds may cross the antimeridian. Responses are cursor-paged (`locations`, `next_cursor`) so clients can load every matching pilot; results are ordered by session ID and contain no account IDs or private flight telemetry. Stop the session with `POST /api/v1/tracking/sessions/{session_id}/stop` and `{"end_time":"…"}`. Authenticated `GET /api/v1/tracking` lists only the caller's active sessions. Session creation is limited to 10 requests/minute, public-sharing updates to 20, point batches to 60, and map viewport queries to 60 requests/minute per client IP.
 
+### Live tracking web map
+
+Open `/live` for the authenticated full-screen map. It signs in through the existing login endpoint, keeps the access token in memory only, loads every cursor page of publicly shared active pilots, and refreshes the map every 15 seconds. The panel shows each returned pilot name, coordinates, heading when available, observation time, and freshness status; the page intentionally does not expose altitude or other private telemetry because the public API contract excludes those fields. The release console links to the live map through its `Live map` button.
+
 Authenticated `GET /api/v1/flight-logs` and `/api/v1/chat` remain reserved and return `501 Not Implemented`; Redis client initialization is available for future modules.
 
 ## Android APK releases

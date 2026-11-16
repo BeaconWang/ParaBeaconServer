@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ParaBeacon Live Tracking</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root { color-scheme: dark; --bg:#07101e; --panel:#101b2c; --panel-strong:#0c1728ee; --line:#2a3b57; --muted:#9eacc4; --text:#f2f6ff; --accent:#66e4bd; --accent-2:#8aa4ff; --danger:#ff9cab; --shadow:0 20px 70px #0008; }
+    * { box-sizing:border-box; }
+    html, body { width:100%; height:100%; margin:0; overflow:hidden; color:var(--text); background:var(--bg); font:14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    button, input { font:inherit; }
+    button { cursor:pointer; }
+    #map { position:fixed; inset:0; background:#b6c6d7; }
+    .leaflet-control-zoom { border:1px solid var(--line) !important; box-shadow:var(--shadow) !important; }
+    .leaflet-control-zoom a { color:var(--text) !important; background:var(--panel) !important; border-color:var(--line) !important; }
+    .leaflet-control-attribution { color:#40526c !important; background:#eef4ffdd !important; }
+    .leaflet-control-attribution a { color:#234b7f !important; }
+    .topbar, .panel, .auth-card { border:1px solid var(--line); background:linear-gradient(145deg, #15253beF, var(--panel-strong)); box-shadow:var(--shadow); backdrop-filter:blur(14px); }
+    .topbar { position:fixed; z-index:500; top:18px; left:18px; right:18px; display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:62px; padding:10px 14px 10px 18px; border-radius:18px; }
+    .brand { display:flex; align-items:center; gap:12px; min-width:0; }
+    .brand-mark { display:grid; place-items:center; width:34px; height:34px; border-radius:11px; color:#06131a; background:var(--accent); font-weight:900; }
+    .eyebrow { color:var(--accent); font-size:11px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
+    h1 { margin:1px 0 0; font-size:20px; line-height:1.1; letter-spacing:-.03em; }
+    .topbar-actions { display:flex; align-items:center; gap:8px; }
+    .button { border:1px solid transparent; border-radius:10px; padding:9px 13px; color:#06131a; background:var(--accent); font-weight:800; }
+    .button:hover { filter:brightness(1.08); }
+    .button.secondary { color:var(--text); background:#1b2a43; border-color:var(--line); text-decoration:none; }
+    .button.danger { color:#260810; background:var(--danger); }
+    .panel { position:fixed; z-index:400; top:98px; right:18px; bottom:18px; display:flex; width:min(380px, calc(100vw - 36px)); flex-direction:column; border-radius:20px; overflow:hidden; }
+    .panel-header { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:20px 20px 15px; border-bottom:1px solid var(--line); }
+    .panel-header h2 { margin:0; font-size:19px; letter-spacing:-.03em; }
+    .panel-header p { margin:4px 0 0; color:var(--muted); font-size:12px; }
+    .live-status { display:flex; align-items:center; gap:7px; color:var(--accent); white-space:nowrap; font-size:12px; font-weight:800; }
+    .live-status::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 14px var(--accent); }
+    .live-status.error { color:var(--danger); }
+    .live-status.error::before { background:var(--danger); box-shadow:0 0 14px var(--danger); }
+    #pilot-list { flex:1; overflow:auto; padding:10px; }
+    .pilot-card { display:grid; grid-template-columns:42px 1fr auto; gap:11px; align-items:start; width:100%; padding:13px 10px; border:1px solid transparent; border-radius:14px; color:var(--text); background:transparent; text-align:left; }
+    .pilot-card:hover, .pilot-card.selected { border-color:var(--line); background:#1a2a43aa; }
+    .pilot-icon { display:grid; place-items:center; width:36px; height:36px; border-radius:12px; color:#06131a; background:var(--accent); font-size:16px; font-weight:900; }
+    .pilot-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:800; }
+    .pilot-meta { margin-top:2px; color:var(--muted); font-size:12px; }
+    .pilot-coordinates { margin-top:7px; color:#bfd0ff; font:11px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .pilot-age { color:var(--accent); font-size:11px; white-space:nowrap; }
+    .empty { padding:36px 20px; color:var(--muted); text-align:center; }
+    .panel-footer { padding:13px 20px 17px; border-top:1px solid var(--line); color:var(--muted); font-size:11px; }
+    .notice { min-height:20px; margin-top:8px; color:var(--muted); font-size:12px; }
+    .notice.error { color:var(--danger); }
+    .auth-backdrop { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; padding:20px; background:#030713aa; backdrop-filter:blur(8px); }
+    .auth-card { width:min(430px, 100%); padding:28px; border-radius:22px; }
+    .auth-card h2 { margin:8px 0 6px; font-size:28px; letter-spacing:-.05em; }
+    .auth-card p { margin:0 0 22px; color:var(--muted); }
+    form { display:grid; gap:14px; }
+    label { display:grid; gap:7px; color:var(--muted); font-size:12px; font-weight:800; }
+    input { width:100%; padding:12px 13px; border:1px solid var(--line); border-radius:11px; outline:none; color:var(--text); background:#081326; }
+    input:focus { border-color:var(--accent-2); box-shadow:0 0 0 3px #8aa4ff22; }
+    .auth-card .button { width:100%; margin-top:4px; }
+    [hidden] { display:none !important; }
+    @media (max-width:700px) {
+      .topbar { top:10px; left:10px; right:10px; min-height:56px; padding:9px 10px 9px 12px; }
+      .brand-mark { width:30px; height:30px; }
+      h1 { font-size:17px; }
+      .brand .eyebrow { display:none; }
+      .topbar-actions .button.secondary { display:none; }
+      .panel { top:auto; right:10px; bottom:10px; left:10px; width:auto; height:min(43vh, 360px); }
+      .panel-header { padding:15px 16px 12px; }
+      #pilot-list { padding:6px; }
+      .panel-footer { padding:10px 16px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="map" aria-label="Live tracking map"></div>
+  <header class="topbar">
+    <div class="brand"><div class="brand-mark" aria-hidden="true">PB</div><div><div class="eyebrow">ParaBeacon / Live</div><h1>Public flight tracking</h1></div></div>
+    <div class="topbar-actions"><a class="button secondary" href="/release">Release console</a><button id="logout" class="button danger" type="button" hidden>Sign out</button></div>
+  </header>
+  <aside class="panel" aria-labelledby="pilots-title">
+    <div class="panel-header"><div><h2 id="pilots-title">Live pilots</h2><p id="last-refresh">Waiting for a secure connection</p></div><div id="live-status" class="live-status">Offline</div></div>
+    <div id="pilot-list"><div class="empty">Sign in to view pilots who opted into public live tracking.</div></div>
+    <div class="panel-footer">Only pilots who enabled public sharing appear here. Positions are refreshed every 15 seconds.</div>
+  </aside>
+  <div id="auth-backdrop" class="auth-backdrop">
+    <section class="auth-card" aria-labelledby="auth-title">
+      <div class="eyebrow">Secure map access</div>
+      <h2 id="auth-title">Enter the live map</h2>
+      <p>Sign in to view currently shared pilot locations. Your access and refresh tokens remain in this page's memory only.</p>
+      <form id="login-form">
+        <label>Username or email<input id="identifier" name="identifier" autocomplete="username" required></label>
+        <label>Password<input id="password" name="password" type="password" autocomplete="current-password" required></label>
+        <button id="login-button" class="button" type="submit">Sign in and load map</button>
+        <div id="login-notice" class="notice" role="status" aria-live="polite"></div>
+      </form>
+    </section>
+  </div>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const WORLD_BOUNDS = { west: -180, south: -85.05112878, east: 180, north: 85.05112878 };
+    const REFRESH_MS = 15000;
+    let accessToken = "";
+    let refreshTimer = 0;
+    let map;
+    let locations = [];
+    let markers = new Map();
+    let selectedKey = "";
+    let refreshSequence = 0;
+
+    const escapeHTML = (value) => String(value ?? "").replace(/[&<>\"']/g, (character) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[character]));
+    const formatNumber = (value, digits = 4) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
+    const formatDate = (value) => { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(undefined, { dateStyle:"medium", timeStyle:"short" }); };
+    const ageSeconds = (value) => Math.max(0, Math.round((Date.now() - new Date(value).getTime()) / 1000));
+    const formatAge = (value) => { const seconds = ageSeconds(value); return seconds < 60 ? `${seconds}s ago` : `${Math.floor(seconds / 60)}m ago`; };
+    const setStatus = (message, error = false) => { $("live-status").textContent = message; $("live-status").className = `live-status${error ? " error" : ""}`; };
+    const setLoginNotice = (message, error = false) => { $("login-notice").textContent = message; $("login-notice").className = `notice${error ? " error" : ""}`; };
+    const api = async (path, options = {}) => {
+      const headers = new Headers(options.headers || {});
+      headers.set("Accept", "application/json");
+      if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+      const response = await fetch(path, { ...options, headers, cache: "no-store" });
+      let body = {};
+      try { body = await response.json(); } catch (_) {}
+      if (!response.ok) throw new Error(body.error || `Request failed (${response.status})`);
+      return body;
+    };
+    const locationKey = (location) => `${location.pilot_name}|${location.lat}|${location.lon}`;
+    const markerIcon = (heading) => {
+      const rotation = Number.isFinite(Number(heading)) ? Number(heading) : 0;
+      return L.divIcon({ className: "pilot-marker", html: `<div style="width:34px;height:34px;display:grid;place-items:center;border:2px solid #07101e;border-radius:50%;color:#06131a;background:#66e4bd;box-shadow:0 3px 12px #0008;transform:rotate(${rotation}deg);font-size:17px;font-weight:900">▲</div>`, iconSize:[34,34], iconAnchor:[17,17] });
+    };
+    const popupHTML = (location) => `<strong>${escapeHTML(location.pilot_name || "Unknown pilot")}</strong><br>Latitude: ${formatNumber(location.lat)}<br>Longitude: ${formatNumber(location.lon)}<br>Heading: ${Number.isFinite(Number(location.heading)) ? `${formatNumber(location.heading, 0)}°` : "Not reported"}<br>Observed: ${escapeHTML(formatDate(location.observed_at))}`;
+    const initMap = () => {
+      map = L.map("map", { zoomControl: false, worldCopyJump: true }).setView([20, 0], 2);
+      L.control.zoom({ position: "bottomleft" }).addTo(map);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, minZoom: 2, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" rel="noopener noreferrer">OpenStreetMap</a>' }).addTo(map);
+    };
+    const loadAllLocations = async () => {
+      let cursor = "";
+      const result = [];
+      for (let page = 0; page < 100; page += 1) {
+        const params = new URLSearchParams({ west: WORLD_BOUNDS.west, south: WORLD_BOUNDS.south, east: WORLD_BOUNDS.east, north: WORLD_BOUNDS.north });
+        if (cursor) params.set("cursor", cursor);
+        const body = await api(`/api/v1/map/active-locations?${params}`);
+        result.push(...(Array.isArray(body.locations) ? body.locations : []));
+        cursor = body.next_cursor || "";
+        if (!cursor) break;
+      }
+      return result;
+    };
+    const renderMarkers = (fitMap) => {
+      const nextMarkers = new Map();
+      locations.forEach((location) => {
+        const key = locationKey(location);
+        let marker = markers.get(key);
+        if (!marker) marker = L.marker([location.lat, location.lon], { icon: markerIcon(location.heading), keyboard: true });
+        marker.setLatLng([location.lat, location.lon]);
+        marker.setIcon(markerIcon(location.heading));
+        marker.bindPopup(popupHTML(location));
+        marker.addTo(map);
+        nextMarkers.set(key, marker);
+      });
+      markers.forEach((marker, key) => { if (!nextMarkers.has(key)) marker.remove(); });
+      markers = nextMarkers;
+      if (fitMap && locations.length) {
+        const bounds = L.latLngBounds(locations.map((location) => [location.lat, location.lon]));
+        if (locations.length === 1) map.setView(bounds.getCenter(), 8); else map.fitBounds(bounds.pad(0.18), { maxZoom: 12 });
+      }
+    };
+    const focusPilot = (location, key) => { selectedKey = key; map.setView([location.lat, location.lon], Math.max(map.getZoom(), 9), { animate: true }); const marker = markers.get(key); if (marker) marker.openPopup(); renderList(); };
+    const renderList = () => {
+      const list = $("pilot-list");
+      if (!locations.length) { list.innerHTML = '<div class="empty">No public live pilots were found in the latest update.</div>'; return; }
+      list.replaceChildren(...locations.map((location) => {
+        const key = locationKey(location);
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = `pilot-card${key === selectedKey ? " selected" : ""}`;
+        const age = ageSeconds(location.observed_at);
+        card.innerHTML = `<span class="pilot-icon" aria-hidden="true">▲</span><span><span class="pilot-name"></span><span class="pilot-meta">${Number.isFinite(Number(location.heading)) ? `Heading ${formatNumber(location.heading, 0)}°` : "Heading not reported"} · <span class="pilot-age">${escapeHTML(formatAge(location.observed_at))}</span></span><span class="pilot-coordinates">${formatNumber(location.lat)}, ${formatNumber(location.lon)}</span></span><span class="pilot-age">${age < 90 ? "LIVE" : "STALE"}</span>`;
+        card.querySelector(".pilot-name").textContent = location.pilot_name || "Unknown pilot";
+        card.addEventListener("click", () => focusPilot(location, key));
+        return card;
+      }));
+    };
+    const refreshLocations = async (fitMap = false) => {
+      const sequence = ++refreshSequence;
+      try {
+        const next = await loadAllLocations();
+        if (sequence !== refreshSequence) return;
+        locations = next;
+        renderMarkers(fitMap);
+        renderList();
+        $("last-refresh").textContent = `Updated ${new Date().toLocaleTimeString()} · ${locations.length} public pilot${locations.length === 1 ? "" : "s"}`;
+        setStatus("Live", false);
+      } catch (error) {
+        if (sequence !== refreshSequence) return;
+        setStatus(error.message === "unauthorized" ? "Signed out" : "Unavailable", true);
+        $("last-refresh").textContent = "The map could not be refreshed";
+        if (error.message === "unauthorized") signOut();
+      }
+    };
+    const startLiveMap = async () => {
+      $("auth-backdrop").hidden = true;
+      $("logout").hidden = false;
+      if (!map) initMap();
+      await refreshLocations(true);
+      window.clearInterval(refreshTimer);
+      refreshTimer = window.setInterval(() => refreshLocations(false), REFRESH_MS);
+    };
+    const signOut = () => {
+      accessToken = "";
+      window.clearInterval(refreshTimer);
+      refreshTimer = 0;
+      locations = [];
+      selectedKey = "";
+      markers.forEach((marker) => marker.remove());
+      markers = new Map();
+      renderList();
+      $("logout").hidden = true;
+      $("auth-backdrop").hidden = false;
+      $("password").value = "";
+      setStatus("Offline");
+      $("last-refresh").textContent = "Waiting for a secure connection";
+    };
+    $("login-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const button = $("login-button");
+      button.disabled = true;
+      setLoginNotice("Signing in…");
+      try {
+        const body = await fetch("/api/v1/auth/login", { method:"POST", headers:{ "Content-Type":"application/json", "Accept":"application/json" }, body:JSON.stringify({ identifier:$("identifier").value.trim(), password:$("password").value }) }).then(async (response) => { let payload = {}; try { payload = await response.json(); } catch (_) {} if (!response.ok) throw new Error(payload.error || `Request failed (${response.status})`); return payload; });
+        if (!body.access_token) throw new Error("The server did not return an access token");
+        accessToken = body.access_token;
+        setLoginNotice("");
+        await startLiveMap();
+      } catch (error) { accessToken = ""; setLoginNotice(error.message, true); } finally { button.disabled = false; }
+    });
+    $("logout").addEventListener("click", signOut);
+    if (window.L) initMap(); else setStatus("Map unavailable", true);
+  </script>
+</body>
+</html>
