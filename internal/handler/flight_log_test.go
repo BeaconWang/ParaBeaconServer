@@ -15,14 +15,21 @@ import (
 )
 
 type flightLogHandlerTestService struct {
-	userID  uuid.UUID
-	after   uuid.UUID
-	flights []json.RawMessage
+	userID    uuid.UUID
+	after     uuid.UUID
+	flights   []json.RawMessage
+	syncCalls int
 }
 
 func (s *flightLogHandlerTestService) Import(_ context.Context, userID uuid.UUID, flights []json.RawMessage) (int, int, error) {
 	s.userID, s.flights = userID, flights
 	return len(flights), 0, nil
+}
+
+func (s *flightLogHandlerTestService) Sync(_ context.Context, userID uuid.UUID, flights []json.RawMessage) (int, error) {
+	s.userID, s.flights = userID, flights
+	s.syncCalls++
+	return len(flights), nil
 }
 
 func (s *flightLogHandlerTestService) List(_ context.Context, userID, after uuid.UUID) ([]model.FlightLog, bool, error) {
@@ -42,6 +49,10 @@ func TestFlightLogImportAndListUseAuthenticatedUser(t *testing.T) {
 	engine.GET("/flight-logs", func(c *gin.Context) {
 		c.Set(middleware.AuthenticatedUserIDKey, userID)
 		NewFlightLogHandler(service).List(c)
+	})
+	engine.PUT("/flight-logs/sync", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		NewFlightLogHandler(service).Sync(c)
 	})
 
 	response := httptest.NewRecorder()
@@ -68,6 +79,33 @@ func TestFlightLogImportAndListUseAuthenticatedUser(t *testing.T) {
 	}
 	if string(entries[0]["flight"]) != `{"startTime":1,"endTime":2,"pointCount":1}` {
 		t.Fatalf("flight payload was not returned as JSON: %s", entries[0]["flight"])
+	}
+}
+
+func TestFlightLogSyncAcceptsEmptySnapshotAndRejectsNull(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &flightLogHandlerTestService{}
+	userID := uuid.New()
+	engine := gin.New()
+	engine.PUT("/flight-logs/sync", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		NewFlightLogHandler(service).Sync(c)
+	})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/flight-logs/sync", strings.NewReader(`{"flights":[]}`))
+	request.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || service.userID != userID || service.syncCalls != 1 || service.flights == nil || len(service.flights) != 0 {
+		t.Fatalf("empty sync status=%d user=%s calls=%d flights=%v body=%s", response.Code, service.userID, service.syncCalls, service.flights, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPut, "/flight-logs/sync", strings.NewReader(`{"flights":null}`))
+	request.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || service.syncCalls != 1 {
+		t.Fatalf("null snapshot status=%d calls=%d; body=%s", response.Code, service.syncCalls, response.Body.String())
 	}
 }
 

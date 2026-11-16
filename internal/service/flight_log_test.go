@@ -11,14 +11,21 @@ import (
 )
 
 type flightLogTestRepository struct {
-	userID uuid.UUID
-	logs   []model.FlightLog
-	limit  int
+	userID      uuid.UUID
+	logs        []model.FlightLog
+	limit       int
+	replaceCall int
 }
 
 func (r *flightLogTestRepository) Import(_ context.Context, userID uuid.UUID, logs []model.FlightLog) (int, int, error) {
 	r.userID, r.logs = userID, logs
 	return len(logs), 0, nil
+}
+
+func (r *flightLogTestRepository) Replace(_ context.Context, userID uuid.UUID, logs []model.FlightLog) error {
+	r.userID, r.logs = userID, logs
+	r.replaceCall++
+	return nil
 }
 
 func (r *flightLogTestRepository) List(_ context.Context, userID, _ uuid.UUID, limit int) ([]model.FlightLog, bool, error) {
@@ -62,6 +69,48 @@ func TestFlightLogServiceRejectsInvalidRecords(t *testing.T) {
 	}
 	if len(repository.logs) != 0 {
 		t.Fatalf("invalid records reached repository: %#v", repository.logs)
+	}
+}
+
+func TestFlightLogSyncReplacesAccountSnapshotAndAllowsEmpty(t *testing.T) {
+	repository := &flightLogTestRepository{logs: []model.FlightLog{{Data: `{"old":true}`}}}
+	logs := NewFlightLogService(repository)
+	userID := uuid.New()
+	start := time.Now().UTC().Add(-time.Hour).Truncate(time.Millisecond)
+	flight, _ := json.Marshal(map[string]any{
+		"startTime":  start.UnixMilli(),
+		"endTime":    start.Add(time.Minute).UnixMilli(),
+		"pointCount": 2,
+		"samples":    []any{},
+	})
+
+	synced, err := logs.Sync(context.Background(), userID, []json.RawMessage{flight})
+	if err != nil || synced != 1 {
+		t.Fatalf("Sync() = %d, %v; want 1, nil", synced, err)
+	}
+	if repository.userID != userID || repository.replaceCall != 1 || len(repository.logs) != 1 || repository.logs[0].Data != string(flight) {
+		t.Fatalf("replacement snapshot = %#v for user %s (%d calls)", repository.logs, repository.userID, repository.replaceCall)
+	}
+
+	synced, err = logs.Sync(context.Background(), userID, []json.RawMessage{})
+	if err != nil || synced != 0 {
+		t.Fatalf("Sync(empty) = %d, %v; want 0, nil", synced, err)
+	}
+	if repository.replaceCall != 2 || repository.logs == nil || len(repository.logs) != 0 {
+		t.Fatalf("empty snapshot was not forwarded for replacement: %#v (%d calls)", repository.logs, repository.replaceCall)
+	}
+}
+
+func TestFlightLogSyncRejectsInvalidSnapshotBeforeReplacing(t *testing.T) {
+	repository := &flightLogTestRepository{logs: []model.FlightLog{{Data: `{"keep":true}`}}}
+	logs := NewFlightLogService(repository)
+	userID := uuid.New()
+	duplicate := json.RawMessage(`{"startTime":1700000000000,"endTime":1700000001000,"pointCount":1}`)
+	if _, err := logs.Sync(context.Background(), userID, []json.RawMessage{duplicate, duplicate}); err != ErrInvalidFlightLog {
+		t.Fatalf("Sync() duplicate error = %v, want ErrInvalidFlightLog", err)
+	}
+	if repository.replaceCall != 0 || len(repository.logs) != 1 || repository.logs[0].Data != `{"keep":true}` {
+		t.Fatalf("invalid snapshot reached repository: %#v (%d calls)", repository.logs, repository.replaceCall)
 	}
 }
 

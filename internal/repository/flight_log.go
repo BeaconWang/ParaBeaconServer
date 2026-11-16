@@ -12,6 +12,7 @@ import (
 
 type FlightLogRepository interface {
 	Import(ctx context.Context, userID uuid.UUID, logs []model.FlightLog) (int, int, error)
+	Replace(ctx context.Context, userID uuid.UUID, logs []model.FlightLog) error
 	List(ctx context.Context, userID, after uuid.UUID, limit int) ([]model.FlightLog, bool, error)
 }
 
@@ -25,6 +26,9 @@ func NewFlightLogRepository(db *gorm.DB) *GormFlightLogRepository {
 
 func (r *GormFlightLogRepository) Import(ctx context.Context, userID uuid.UUID, logs []model.FlightLog) (accepted, skipped int, err error) {
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockFlightLogOwner(tx, userID); err != nil {
+			return err
+		}
 		for _, log := range logs {
 			var count int64
 			if err := tx.Model(&model.FlightLog{}).
@@ -54,6 +58,64 @@ func (r *GormFlightLogRepository) Import(ctx context.Context, userID uuid.UUID, 
 		return nil
 	})
 	return accepted, skipped, err
+}
+
+func (r *GormFlightLogRepository) Replace(ctx context.Context, userID uuid.UUID, logs []model.FlightLog) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := lockFlightLogOwner(tx, userID); err != nil {
+			return err
+		}
+
+		var existing []model.FlightLog
+		if err := tx.Model(&model.FlightLog{}).
+			Select("id", "started_at", "point_count").
+			Where("user_id = ?", userID).
+			Find(&existing).Error; err != nil {
+			return err
+		}
+		existingByIdentity := make(map[flightLogIdentity]model.FlightLog, len(existing))
+		for _, log := range existing {
+			existingByIdentity[flightLogIdentity{startedAt: log.StartedAt.UnixMicro(), pointCount: log.PointCount}] = log
+		}
+
+		retainedIDs := make([]uuid.UUID, 0, len(logs))
+		for index := range logs {
+			logs[index].UserID = userID
+			identity := flightLogIdentity{startedAt: logs[index].StartedAt.UnixMicro(), pointCount: logs[index].PointCount}
+			if current, found := existingByIdentity[identity]; found {
+				logs[index].ID = current.ID
+				retainedIDs = append(retainedIDs, current.ID)
+			} else {
+				logs[index].ID = uuid.New()
+			}
+		}
+
+		staleQuery := tx.Where("user_id = ?", userID)
+		if len(retainedIDs) > 0 {
+			staleQuery = staleQuery.Where("id NOT IN ?", retainedIDs)
+		}
+		if err := staleQuery.Delete(&model.FlightLog{}).Error; err != nil {
+			return err
+		}
+		if len(logs) == 0 {
+			return nil
+		}
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "started_at"}, {Name: "point_count"}},
+			DoUpdates: clause.AssignmentColumns([]string{"data"}),
+		}).CreateInBatches(&logs, 100).Error
+	})
+}
+
+type flightLogIdentity struct {
+	startedAt  int64
+	pointCount int
+}
+
+func lockFlightLogOwner(tx *gorm.DB, userID uuid.UUID) error {
+	var user model.User
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").First(&user, "id = ?", userID).Error
 }
 
 func (r *GormFlightLogRepository) List(ctx context.Context, userID, after uuid.UUID, limit int) ([]model.FlightLog, bool, error) {

@@ -44,7 +44,7 @@ func TestLandingPointImportAndListAreUserScoped(t *testing.T) {
 		c.Set(middleware.AuthenticatedUserIDKey, userID)
 		NewLandingPointHandler(service).List(c)
 	})
-	body := `{"points":[{"id":"client-1","name":"Landing","latitude":47.1,"longitude":8.5,"altitudeM":1200,"createdAt":"` + time.Now().UTC().Format(time.RFC3339Nano) + `","notes":"safe"}],"default_id":"client-1"}`
+	body := strings.ReplaceAll(`{"points":[{"id":"client-1","name":"Landing","latitude":47.1,"longitude":8.5,"altitudeM":1200,"createdAt":"`+time.Now().UTC().Format(time.RFC3339Nano)+`","notes":"safe"}],"default_id":"client-1"}`, "client-1", defaultID)
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/landing-points", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")

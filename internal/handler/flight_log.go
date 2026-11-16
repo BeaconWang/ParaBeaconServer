@@ -15,10 +15,14 @@ import (
 	"github.com/parabeacon/server/internal/service"
 )
 
-const maxFlightLogRequestBytes = 25 << 20
+const (
+	maxFlightLogRequestBytes = 25 << 20
+	maxFlightLogSyncBytes    = 100 << 20
+)
 
 type FlightLogService interface {
 	Import(ctx context.Context, userID uuid.UUID, flights []json.RawMessage) (int, int, error)
+	Sync(ctx context.Context, userID uuid.UUID, flights []json.RawMessage) (int, error)
 	List(ctx context.Context, userID, after uuid.UUID) ([]model.FlightLog, bool, error)
 }
 
@@ -65,6 +69,43 @@ func (h *FlightLogHandler) Import(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"accepted": accepted, "skipped": skipped})
+}
+
+func (h *FlightLogHandler) Sync(c *gin.Context) {
+	userID, ok := flightLogUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxFlightLogSyncBytes)
+	var request struct {
+		Flights []json.RawMessage `json:"flights"`
+	}
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if request.Flights == nil {
+		respondError(c, http.StatusBadRequest, "missing flight records")
+		return
+	}
+	synced, err := h.logs.Sync(c.Request.Context(), userID, request.Flights)
+	if errors.Is(err, service.ErrInvalidFlightLog) {
+		respondError(c, http.StatusBadRequest, "invalid flight records")
+		return
+	}
+	if err != nil {
+		respondInternalError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"synced": synced})
 }
 
 func (h *FlightLogHandler) List(c *gin.Context) {

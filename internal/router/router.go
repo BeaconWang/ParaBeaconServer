@@ -104,6 +104,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.POST("/tracking/sessions/:session_id/stop", trackingHandler.Stop)
 		protected.GET("/flight-logs", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), flightLogHandler.List)
 		protected.POST("/flight-logs", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), flightLogHandler.Import)
+		protected.PUT("/flight-logs/sync", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), flightLogHandler.Sync)
 		protected.GET("/landing-points", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), landingPointHandler.List)
 		protected.POST("/landing-points", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), landingPointHandler.Import)
 		protected.GET("/chat", handler.NotImplemented("chat_im"))
