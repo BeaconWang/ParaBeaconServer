@@ -79,7 +79,7 @@ func TestHomeHandlerServesGuideWithSecurityPolicy(t *testing.T) {
 	if got := response.Header().Get("Content-Security-Policy"); got == "" {
 		t.Fatal("home page has no content security policy")
 	}
-	for _, marker := range []string{"ParaBeacon", "Live tracking map", "Release console"} {
+	for _, marker := range []string{"ParaBeacon", "homePanelTitle", "homeFeatureOneTitle"} {
 		if !strings.Contains(response.Body.String(), marker) {
 			t.Errorf("home page does not contain %q", marker)
 		}
