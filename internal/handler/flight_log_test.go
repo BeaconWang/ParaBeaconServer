@@ -15,10 +15,16 @@ import (
 )
 
 type flightLogHandlerTestService struct {
-	userID    uuid.UUID
-	after     uuid.UUID
-	flights   []json.RawMessage
-	syncCalls int
+	userID        uuid.UUID
+	after         uuid.UUID
+	flights       []json.RawMessage
+	syncCalls     int
+	syncID        uuid.UUID
+	expectedCount int
+	batchIndex    int
+	batchCalls    int
+	commitCalls   int
+	beginCalls    int
 }
 
 func (s *flightLogHandlerTestService) Import(_ context.Context, userID uuid.UUID, flights []json.RawMessage) (int, int, error) {
@@ -30,6 +36,24 @@ func (s *flightLogHandlerTestService) Sync(_ context.Context, userID uuid.UUID, 
 	s.userID, s.flights = userID, flights
 	s.syncCalls++
 	return len(flights), nil
+}
+
+func (s *flightLogHandlerTestService) BeginSync(_ context.Context, userID uuid.UUID, expectedCount int) (uuid.UUID, error) {
+	s.userID, s.expectedCount, s.syncID = userID, expectedCount, uuid.New()
+	s.beginCalls++
+	return s.syncID, nil
+}
+
+func (s *flightLogHandlerTestService) UploadSyncBatch(_ context.Context, userID, syncID uuid.UUID, batchIndex int, flights []json.RawMessage) error {
+	s.userID, s.syncID, s.batchIndex, s.flights = userID, syncID, batchIndex, flights
+	s.batchCalls++
+	return nil
+}
+
+func (s *flightLogHandlerTestService) CommitSync(_ context.Context, userID, syncID uuid.UUID) (int, error) {
+	s.userID, s.syncID = userID, syncID
+	s.commitCalls++
+	return s.expectedCount, nil
 }
 
 func (s *flightLogHandlerTestService) List(_ context.Context, userID, after uuid.UUID) ([]model.FlightLog, bool, error) {
@@ -79,6 +103,51 @@ func TestFlightLogImportAndListUseAuthenticatedUser(t *testing.T) {
 	}
 	if string(entries[0]["flight"]) != `{"startTime":1,"endTime":2,"pointCount":1}` {
 		t.Fatalf("flight payload was not returned as JSON: %s", entries[0]["flight"])
+	}
+}
+
+func TestFlightLogStagedSyncEndpointsUseAuthenticatedAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &flightLogHandlerTestService{}
+	userID := uuid.New()
+	engine := gin.New()
+	handler := NewFlightLogHandler(service)
+	engine.POST("/flight-logs/syncs", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.BeginSync(c)
+	})
+	engine.PUT("/flight-logs/syncs/:sync_id/batches/:batch_index", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.UploadSyncBatch(c)
+	})
+	engine.POST("/flight-logs/syncs/:sync_id/commit", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.CommitSync(c)
+	})
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/flight-logs/syncs", strings.NewReader(`{"expected_count":1}`))
+	request.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || service.userID != userID || service.expectedCount != 1 {
+		t.Fatalf("begin status=%d user=%s count=%d body=%s", response.Code, service.userID, service.expectedCount, response.Body.String())
+	}
+
+	flight := `{"startTime":1700000000000,"endTime":1700000001000,"pointCount":1}`
+	batchPath := "/flight-logs/syncs/" + service.syncID.String() + "/batches/0"
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPut, batchPath, strings.NewReader(`{"flights":[`+flight+`]}`))
+	request.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || service.batchCalls != 1 || service.batchIndex != 0 || service.userID != userID {
+		t.Fatalf("batch status=%d user=%s calls=%d index=%d body=%s", response.Code, service.userID, service.batchCalls, service.batchIndex, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/flight-logs/syncs/"+service.syncID.String()+"/commit", nil)
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || service.commitCalls != 1 || service.userID != userID {
+		t.Fatalf("commit status=%d user=%s calls=%d body=%s", response.Code, service.userID, service.commitCalls, response.Body.String())
 	}
 }
 

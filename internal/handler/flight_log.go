@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/middleware"
 	"github.com/parabeacon/server/internal/model"
+	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/internal/service"
 )
 
@@ -23,6 +24,9 @@ const (
 type FlightLogService interface {
 	Import(ctx context.Context, userID uuid.UUID, flights []json.RawMessage) (int, int, error)
 	Sync(ctx context.Context, userID uuid.UUID, flights []json.RawMessage) (int, error)
+	BeginSync(ctx context.Context, userID uuid.UUID, expectedCount int) (uuid.UUID, error)
+	UploadSyncBatch(ctx context.Context, userID, syncID uuid.UUID, batchIndex int, flights []json.RawMessage) error
+	CommitSync(ctx context.Context, userID, syncID uuid.UUID) (int, error)
 	List(ctx context.Context, userID, after uuid.UUID) ([]model.FlightLog, bool, error)
 }
 
@@ -69,6 +73,119 @@ func (h *FlightLogHandler) Import(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"accepted": accepted, "skipped": skipped})
+}
+
+func (h *FlightLogHandler) BeginSync(c *gin.Context) {
+	userID, ok := flightLogUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+	var request struct {
+		ExpectedCount *int `json:"expected_count"`
+	}
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || request.ExpectedCount == nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	syncID, err := h.logs.BeginSync(c.Request.Context(), userID, *request.ExpectedCount)
+	if err != nil {
+		if handleFlightLogSyncError(c, err) {
+			return
+		}
+		respondInternalError(c)
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"sync_id": syncID.String()})
+}
+
+func (h *FlightLogHandler) UploadSyncBatch(c *gin.Context) {
+	userID, ok := flightLogUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	syncID, err := uuid.Parse(c.Param("sync_id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid sync id")
+		return
+	}
+	batchIndex, err := strconv.Atoi(c.Param("batch_index"))
+	if err != nil || batchIndex < 0 {
+		respondError(c, http.StatusBadRequest, "invalid batch index")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.MaxFlightLogSyncBatchBytes+(1<<20))
+	var request struct {
+		Flights []json.RawMessage `json:"flights"`
+	}
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if request.Flights == nil || len(request.Flights) == 0 {
+		respondError(c, http.StatusBadRequest, "missing flight records")
+		return
+	}
+	if err := h.logs.UploadSyncBatch(c.Request.Context(), userID, syncID, batchIndex, request.Flights); err != nil {
+		if handleFlightLogSyncError(c, err) {
+			return
+		}
+		respondInternalError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"accepted": len(request.Flights), "batch_index": batchIndex})
+}
+
+func (h *FlightLogHandler) CommitSync(c *gin.Context) {
+	userID, ok := flightLogUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	syncID, err := uuid.Parse(c.Param("sync_id"))
+	if err != nil {
+		respondError(c, http.StatusBadRequest, "invalid sync id")
+		return
+	}
+	synced, err := h.logs.CommitSync(c.Request.Context(), userID, syncID)
+	if err != nil {
+		if handleFlightLogSyncError(c, err) {
+			return
+		}
+		respondInternalError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"synced": synced})
+}
+
+func handleFlightLogSyncError(c *gin.Context, err error) bool {
+	switch {
+	case errors.Is(err, service.ErrInvalidFlightLog):
+		respondError(c, http.StatusBadRequest, "invalid flight log sync")
+	case errors.Is(err, service.ErrFlightLogSyncNotFound), errors.Is(err, repository.ErrFlightLogSyncNotFound):
+		respondError(c, http.StatusNotFound, "flight log sync not found or expired")
+	case errors.Is(err, service.ErrFlightLogSyncConflict), errors.Is(err, repository.ErrFlightLogSyncConflict):
+		respondError(c, http.StatusConflict, "flight log sync conflict")
+	default:
+		return false
+	}
+	return true
 }
 
 func (h *FlightLogHandler) Sync(c *gin.Context) {
