@@ -16,15 +16,20 @@ type TokenManager struct {
 
 type Claims struct {
 	jwt.RegisteredClaims
+	SessionID string `json:"sid,omitempty"`
 }
 
 func NewTokenManager(secret, issuer string, ttl time.Duration) *TokenManager {
 	return &TokenManager{secret: []byte(secret), issuer: issuer, ttl: ttl}
 }
 
-func (m *TokenManager) Issue(userID uuid.UUID) (string, time.Time, error) {
+func (m *TokenManager) Issue(userID uuid.UUID, sessionIDs ...uuid.UUID) (string, time.Time, error) {
 	now := time.Now().UTC()
 	expiresAt := now.Add(m.ttl)
+	sessionID := ""
+	if len(sessionIDs) > 0 && sessionIDs[0] != uuid.Nil {
+		sessionID = sessionIDs[0].String()
+	}
 	claims := Claims{RegisteredClaims: jwt.RegisteredClaims{
 		Issuer:    m.issuer,
 		Subject:   userID.String(),
@@ -32,7 +37,7 @@ func (m *TokenManager) Issue(userID uuid.UUID) (string, time.Time, error) {
 		IssuedAt:  jwt.NewNumericDate(now),
 		NotBefore: jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(expiresAt),
-	}}
+	}, SessionID: sessionID}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(m.secret)
 	if err != nil {
@@ -57,6 +62,11 @@ func (m *TokenManager) Parse(raw string) (*Claims, error) {
 	}
 	if _, err := uuid.Parse(claims.Subject); err != nil {
 		return nil, fmt.Errorf("invalid token subject: %w", err)
+	}
+	if claims.SessionID != "" {
+		if _, err := uuid.Parse(claims.SessionID); err != nil {
+			return nil, fmt.Errorf("invalid token session: %w", err)
+		}
 	}
 	return claims, nil
 }

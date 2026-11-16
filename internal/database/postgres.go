@@ -34,8 +34,29 @@ func Open(ctx context.Context, dsn string) (*gorm.DB, error) {
 	if err := sqlDB.PingContext(pingCtx); err != nil {
 		return nil, fmt.Errorf("ping PostgreSQL: %w", err)
 	}
-	if err := db.WithContext(ctx).AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.LiveTrackSession{}, &model.LiveTrackPoint{}, &model.AppRelease{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.LiveTrackSession{}, &model.LiveTrackPoint{}, &model.FlightLog{}, &model.LandingPoint{}, &model.LandingPointSettings{}, &model.AppRelease{}); err != nil {
 		return nil, fmt.Errorf("migrate database schema: %w", err)
+	}
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("ALTER TABLE refresh_tokens ALTER COLUMN expires_at DROP NOT NULL").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			WITH ranked_sessions AS (
+				SELECT id, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY created_at DESC, id DESC) AS session_rank
+				FROM refresh_tokens
+				WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
+			)
+			UPDATE refresh_tokens AS tokens
+			SET revoked_at = CURRENT_TIMESTAMP
+			FROM ranked_sessions
+			WHERE tokens.id = ranked_sessions.id AND ranked_sessions.session_rank > 1
+		`).Error; err != nil {
+			return err
+		}
+		return tx.Exec("UPDATE refresh_tokens SET expires_at = NULL WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)").Error
+	}); err != nil {
+		return nil, fmt.Errorf("migrate persistent account sessions: %w", err)
 	}
 	return db, nil
 }

@@ -62,6 +62,12 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	trackingRepo := repository.NewTrackingRepository(db)
 	trackingService := service.NewTrackingService(trackingRepo)
 	trackingHandler := handler.NewTrackingHandler(trackingService)
+	flightLogRepo := repository.NewFlightLogRepository(db)
+	flightLogService := service.NewFlightLogService(flightLogRepo)
+	flightLogHandler := handler.NewFlightLogHandler(flightLogService)
+	landingPointRepo := repository.NewLandingPointRepository(db)
+	landingPointService := service.NewLandingPointService(landingPointRepo)
+	landingPointHandler := handler.NewLandingPointHandler(landingPointService)
 	appReleaseRepository := repository.NewAppReleaseRepository(db)
 	appReleaseService, err := service.NewAppReleaseService(
 		appReleaseRepository,
@@ -86,18 +92,20 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		v1.GET("/admin/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.List)
 		v1.DELETE("/admin/app/releases/:version_code", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Delete)
 		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Publish)
-
 		v1.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), trackingHandler.ListPublicLocations)
 
 		protected := v1.Group("")
-		protected.Use(middleware.RequireAuth(tokens))
+		protected.Use(middleware.RequireAuth(tokens, repository.NewRefreshTokenRepository(db)))
 		protected.GET("/user/profile", userHandler.Profile)
 		protected.GET("/tracking", trackingHandler.ListActive)
 		protected.POST("/tracking/sessions", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), trackingHandler.Start)
 		protected.POST("/tracking/sessions/:session_id/points", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), trackingHandler.AddPoints)
 		protected.PATCH("/tracking/sessions/:session_id/public-sharing", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), trackingHandler.SetPublicSharing)
 		protected.POST("/tracking/sessions/:session_id/stop", trackingHandler.Stop)
-		protected.GET("/flight-logs", handler.NotImplemented("flight_logs_igc"))
+		protected.GET("/flight-logs", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), flightLogHandler.List)
+		protected.POST("/flight-logs", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), flightLogHandler.Import)
+		protected.GET("/landing-points", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), landingPointHandler.List)
+		protected.POST("/landing-points", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), landingPointHandler.Import)
 		protected.GET("/chat", handler.NotImplemented("chat_im"))
 	}
 	return engine, nil

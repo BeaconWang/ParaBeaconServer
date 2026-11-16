@@ -30,10 +30,7 @@ var (
 	usernamePattern       = regexp.MustCompile(`^[a-zA-Z0-9_]{3,32}$`)
 )
 
-const (
-	MinPasswordCharacters = 6
-	RefreshTokenLifetime  = 60 * 24 * time.Hour
-)
+const MinPasswordCharacters = 6
 
 type AuthService struct {
 	users         repository.UserRepository
@@ -46,7 +43,7 @@ type AuthResult struct {
 	Token            string
 	ExpiresAt        time.Time
 	RefreshToken     string
-	RefreshExpiresAt time.Time
+	RefreshExpiresAt *time.Time
 }
 
 func NewAuthService(users repository.UserRepository, tokens *utils.TokenManager, refreshTokens ...repository.RefreshTokenRepository) *AuthService {
@@ -102,29 +99,36 @@ func (s *AuthService) Login(ctx context.Context, identifier, password string) (*
 	if err := utils.VerifyPassword(user.PasswordHash, password); err != nil {
 		return nil, ErrInvalidCredentials
 	}
-	token, expiresAt, err := s.tokens.Issue(user.ID)
-	if err != nil {
-		return nil, err
-	}
-	result := &AuthResult{User: user, Token: token, ExpiresAt: expiresAt}
-	if s.refreshTokens != nil {
-		refreshToken, tokenHash, err := createRefreshToken()
+	if s.refreshTokens == nil {
+		token, expiresAt, err := s.tokens.Issue(user.ID)
 		if err != nil {
 			return nil, err
 		}
-		refreshExpiresAt := time.Now().UTC().Add(RefreshTokenLifetime)
-		if err := s.refreshTokens.Create(ctx, &model.RefreshToken{
-			ID:        uuid.New(),
-			UserID:    user.ID,
-			TokenHash: tokenHash,
-			ExpiresAt: refreshExpiresAt,
-		}); err != nil {
-			return nil, err
-		}
-		result.RefreshToken = refreshToken
-		result.RefreshExpiresAt = refreshExpiresAt
+		return &AuthResult{User: user, Token: token, ExpiresAt: expiresAt}, nil
 	}
-	return result, nil
+
+	refreshToken, tokenHash, err := createRefreshToken()
+	if err != nil {
+		return nil, err
+	}
+	sessionID := uuid.New()
+	token, expiresAt, err := s.tokens.Issue(user.ID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.refreshTokens.CreateSession(ctx, &model.RefreshToken{
+		ID:        sessionID,
+		UserID:    user.ID,
+		TokenHash: tokenHash,
+	}); err != nil {
+		return nil, err
+	}
+	return &AuthResult{
+		User:         user,
+		Token:        token,
+		ExpiresAt:    expiresAt,
+		RefreshToken: refreshToken,
+	}, nil
 }
 
 func (s *AuthService) Refresh(ctx context.Context, rawToken string) (*AuthResult, error) {
@@ -137,8 +141,8 @@ func (s *AuthService) Refresh(ctx context.Context, rawToken string) (*AuthResult
 	}
 	now := time.Now().UTC()
 	replacement := &model.RefreshToken{
+		ID:        uuid.New(),
 		TokenHash: newHash,
-		ExpiresAt: now.Add(RefreshTokenLifetime),
 	}
 	userID, err := s.refreshTokens.Rotate(ctx, hashRefreshToken(rawToken), now, replacement)
 	if err != nil {
@@ -147,15 +151,14 @@ func (s *AuthService) Refresh(ctx context.Context, rawToken string) (*AuthResult
 		}
 		return nil, err
 	}
-	accessToken, expiresAt, err := s.tokens.Issue(userID)
+	accessToken, expiresAt, err := s.tokens.Issue(userID, replacement.ID)
 	if err != nil {
 		return nil, err
 	}
 	return &AuthResult{
-		Token:            accessToken,
-		ExpiresAt:        expiresAt,
-		RefreshToken:     newToken,
-		RefreshExpiresAt: replacement.ExpiresAt,
+		Token:        accessToken,
+		ExpiresAt:    expiresAt,
+		RefreshToken: newToken,
 	}, nil
 }
 
