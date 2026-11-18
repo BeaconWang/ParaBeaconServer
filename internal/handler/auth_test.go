@@ -51,6 +51,14 @@ func (r *authTestUsers) FindByID(_ context.Context, id uuid.UUID) (*model.User, 
 	return nil, gorm.ErrRecordNotFound
 }
 
+func (r *authTestUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, displayName string) error {
+	if r.user.ID != id {
+		return gorm.ErrRecordNotFound
+	}
+	r.user.DisplayName = displayName
+	return nil
+}
+
 var _ repository.UserRepository = (*authTestUsers)(nil)
 
 func TestLoginAcceptsUsernameAndLegacyEmail(t *testing.T) {
@@ -64,6 +72,7 @@ func TestLoginAcceptsUsernameAndLegacyEmail(t *testing.T) {
 	users := &authTestUsers{user: &model.User{
 		ID:           uuid.New(),
 		Username:     "sky_rider",
+		DisplayName:  "Sky Rider",
 		Email:        &email,
 		PasswordHash: hash,
 		CreatedAt:    time.Now().UTC(),

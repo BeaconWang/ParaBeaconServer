@@ -23,6 +23,7 @@ import (
 
 var (
 	ErrConflict           = errors.New("username or email already exists")
+	ErrInvalidDisplayName = errors.New("invalid display name")
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrInvalidInput       = errors.New("invalid registration input")
 	ErrNotFound           = errors.New("user not found")
@@ -84,6 +85,25 @@ func (s *AuthService) Register(ctx context.Context, username, email, password st
 		}
 		return nil, err
 	}
+	return user, nil
+}
+
+func (s *AuthService) UpdateDisplayName(ctx context.Context, userID uuid.UUID, displayName string) (*model.User, error) {
+	if userID == uuid.Nil {
+		return nil, ErrNotFound
+	}
+	displayName = strings.TrimSpace(displayName)
+	if utf8.RuneCountInString(displayName) > 48 || strings.ContainsAny(displayName, "\x00\r\n") {
+		return nil, ErrInvalidDisplayName
+	}
+	user, err := s.Profile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.users.UpdateDisplayName(ctx, userID, displayName); err != nil {
+		return nil, err
+	}
+	user.DisplayName = displayName
 	return user, nil
 }
 

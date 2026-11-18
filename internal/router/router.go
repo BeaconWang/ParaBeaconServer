@@ -114,6 +114,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected := v1.Group("")
 		protected.Use(middleware.RequireAuth(tokens, repository.NewRefreshTokenRepository(db)))
 		protected.GET("/user/profile", userHandler.Profile)
+		protected.PATCH("/user/profile", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), userHandler.UpdateProfile)
 		protected.GET("/tracking", trackingHandler.ListActive)
 		protected.GET("/tracking/live", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), realtime.NewWebSocketHandler(
 			liveHub,

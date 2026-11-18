@@ -65,7 +65,7 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 		locations: []model.PublicPilotLocation{{
 			SessionID:   sessionID,
 			PilotNumber: 123456,
-			PilotName:   "pilot_one",
+			PilotName:   "Sky Rider",
 			Latitude:    47.1,
 			Longitude:   8.5,
 			Altitude:    1200,
@@ -114,6 +114,13 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 		if _, exists := locations[0][privateField]; exists {
 			t.Errorf("public location unexpectedly contains %q", privateField)
 		}
+	}
+	var publicPilotName string
+	if err := json.Unmarshal(locations[0]["pilot_name"], &publicPilotName); err != nil {
+		t.Fatalf("decode public pilot name: %v", err)
+	}
+	if publicPilotName != "Sky Rider" {
+		t.Fatalf("public pilot name = %q, want display name", publicPilotName)
 	}
 	for _, sharedField := range []string{"pilot_name", "pilot_number", "altitude", "speed", "path"} {
 		if _, exists := locations[0][sharedField]; !exists {

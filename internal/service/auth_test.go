@@ -64,6 +64,45 @@ func (r *memoryUsers) FindByID(_ context.Context, id uuid.UUID) (*model.User, er
 	return user, nil
 }
 
+func (r *memoryUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, displayName string) error {
+	user, ok := r.byID[id]
+	if !ok {
+		return gorm.ErrRecordNotFound
+	}
+	user.DisplayName = displayName
+	return nil
+}
+
+func TestAuthServiceUpdatesDisplayNameWithValidation(t *testing.T) {
+	repo := newMemoryUsers()
+	service := NewAuthService(repo, utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute))
+	user, err := service.Register(context.Background(), "sky_rider", "", "abc123")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	updated, err := service.UpdateDisplayName(context.Background(), user.ID, "  Sky Rider  ")
+	if err != nil {
+		t.Fatalf("UpdateDisplayName() error = %v", err)
+	}
+	if updated.DisplayName != "Sky Rider" {
+		t.Fatalf("display name = %q, want trimmed name", updated.DisplayName)
+	}
+	if repo.byID[user.ID].DisplayName != "Sky Rider" {
+		t.Fatalf("persisted display name = %q", repo.byID[user.ID].DisplayName)
+	}
+
+	for _, invalid := range []string{strings.Repeat("a", 49), "first\nsecond", "first\rsecond", "first\x00second"} {
+		if _, err := service.UpdateDisplayName(context.Background(), user.ID, invalid); !errors.Is(err, ErrInvalidDisplayName) {
+			t.Errorf("UpdateDisplayName(%q) error = %v, want invalid display name", invalid, err)
+		}
+	}
+	updated, err = service.UpdateDisplayName(context.Background(), user.ID, "")
+	if err != nil || updated.DisplayName != "" {
+		t.Fatalf("clear display name = %#v, err=%v", updated, err)
+	}
+}
+
 func TestAuthServiceRegisterLoginAndProfile(t *testing.T) {
 	repo := newMemoryUsers()
 	tokens := utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute)

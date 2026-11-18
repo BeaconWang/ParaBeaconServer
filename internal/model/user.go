@@ -10,6 +10,7 @@ import (
 type User struct {
 	ID           uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	Username     string    `gorm:"size:32;not null;uniqueIndex" json:"username"`
+	DisplayName  string    `gorm:"size:48;not null;default:''" json:"display_name"`
 	Email        *string   `gorm:"size:254;uniqueIndex" json:"email,omitempty"`
 	PilotNumber  *int      `gorm:"-:migration" json:"-"`
 	PasswordHash string    `gorm:"size:255;not null" json:"-"`

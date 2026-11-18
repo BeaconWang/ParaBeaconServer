@@ -13,6 +13,7 @@ type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	FindByLogin(ctx context.Context, identifier string) (*model.User, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
+	UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error
 }
 
 type GormUserRepository struct {
@@ -51,4 +52,15 @@ func (r *GormUserRepository) FindByID(ctx context.Context, id uuid.UUID) (*model
 		return nil, fmt.Errorf("find user by id: %w", err)
 	}
 	return &user, nil
+}
+
+func (r *GormUserRepository) UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error {
+	result := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("display_name", displayName)
+	if result.Error != nil {
+		return fmt.Errorf("update user display name: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
