@@ -38,14 +38,21 @@ type logoutRequest struct {
 }
 
 type publicUser struct {
-	ID        string    `json:"id"`
-	Username  string    `json:"username"`
-	Email     *string   `json:"email,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	Username    string    `json:"username"`
+	PilotNumber int       `json:"pilot_number"`
+	Email       *string   `json:"email,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
-func toPublicUser(userID, username string, email *string, createdAt time.Time) publicUser {
-	return publicUser{ID: userID, Username: username, Email: email, CreatedAt: createdAt}
+func toPublicUser(userID, username string, pilotNumber *int, email *string, createdAt time.Time) publicUser {
+	var number int
+	if pilotNumber != nil {
+		number = *pilotNumber
+	}
+	return publicUser{
+		ID: userID, Username: username, PilotNumber: number, Email: email, CreatedAt: createdAt,
+	}
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -67,7 +74,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusCreated, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.PilotNumber, user.Email, user.CreatedAt)})
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -101,7 +108,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		"token_type":   "Bearer",
 		"expires_at":   result.ExpiresAt,
 		"expires_in":   int(time.Until(result.ExpiresAt).Seconds()),
-		"user":         toPublicUser(result.User.ID.String(), result.User.Username, result.User.Email, result.User.CreatedAt),
+		"user":         toPublicUser(result.User.ID.String(), result.User.Username, result.User.PilotNumber, result.User.Email, result.User.CreatedAt),
 	}
 	if result.RefreshToken != "" {
 		response["refresh_token"] = result.RefreshToken

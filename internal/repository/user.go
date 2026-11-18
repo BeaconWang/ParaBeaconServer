@@ -24,6 +24,13 @@ func NewUserRepository(db *gorm.DB) *GormUserRepository {
 }
 
 func (r *GormUserRepository) Create(ctx context.Context, user *model.User) error {
+	if user.PilotNumber == nil {
+		var pilotNumber int
+		if err := r.db.WithContext(ctx).Raw("SELECT nextval('pilot_number_seq')").Scan(&pilotNumber).Error; err != nil {
+			return fmt.Errorf("allocate pilot number: %w", err)
+		}
+		user.PilotNumber = &pilotNumber
+	}
 	if err := r.db.WithContext(ctx).Create(user).Error; err != nil {
 		return fmt.Errorf("create user: %w", err)
 	}

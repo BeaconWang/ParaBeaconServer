@@ -64,6 +64,7 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	service := &trackingHandlerTestService{
 		locations: []model.PublicPilotLocation{{
 			SessionID:   sessionID,
+			PilotNumber: 123456,
 			PilotName:   "pilot_one",
 			Latitude:    47.1,
 			Longitude:   8.5,
@@ -114,7 +115,7 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 			t.Errorf("public location unexpectedly contains %q", privateField)
 		}
 	}
-	for _, sharedField := range []string{"pilot_name", "altitude", "speed", "path"} {
+	for _, sharedField := range []string{"pilot_name", "pilot_number", "altitude", "speed", "path"} {
 		if _, exists := locations[0][sharedField]; !exists {
 			t.Errorf("public location has no shared flight field %q", sharedField)
 		}

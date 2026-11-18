@@ -38,5 +38,5 @@ func (h *UserHandler) Profile(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.PilotNumber, user.Email, user.CreatedAt)})
 }

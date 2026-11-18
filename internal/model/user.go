@@ -11,6 +11,7 @@ type User struct {
 	ID           uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 	Username     string    `gorm:"size:32;not null;uniqueIndex" json:"username"`
 	Email        *string   `gorm:"size:254;uniqueIndex" json:"email,omitempty"`
+	PilotNumber  *int      `gorm:"-:migration" json:"-"`
 	PasswordHash string    `gorm:"size:255;not null" json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`

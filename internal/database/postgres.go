@@ -37,6 +37,9 @@ func Open(ctx context.Context, dsn string) (*gorm.DB, error) {
 	if err := db.WithContext(ctx).AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.LiveTrackSession{}, &model.LiveTrackPoint{}, &model.FlightLog{}, &model.FlightLogSync{}, &model.FlightLogSyncBatch{}, &model.FlightLogSyncRecord{}, &model.LandingPoint{}, &model.LandingPointSettings{}, &model.AppRelease{}); err != nil {
 		return nil, fmt.Errorf("migrate database schema: %w", err)
 	}
+	if err := migratePilotNumbers(db.WithContext(ctx)); err != nil {
+		return nil, fmt.Errorf("migrate pilot numbers: %w", err)
+	}
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("ALTER TABLE refresh_tokens ALTER COLUMN expires_at DROP NOT NULL").Error; err != nil {
 			return err
@@ -59,4 +62,91 @@ func Open(ctx context.Context, dsn string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("migrate persistent account sessions: %w", err)
 	}
 	return db, nil
+}
+
+func migratePilotNumbers(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(748392015)").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("LOCK TABLE users IN ACCESS EXCLUSIVE MODE").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("ALTER TABLE users ADD COLUMN IF NOT EXISTS pilot_number integer").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_pilot_number ON users (pilot_number)").Error; err != nil {
+			return err
+		}
+		var sequenceExists bool
+		if err := tx.Raw("SELECT to_regclass('pilot_number_seq') IS NOT NULL").Scan(&sequenceExists).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("CREATE SEQUENCE IF NOT EXISTS pilot_number_seq MINVALUE 100000 MAXVALUE 999999 START WITH 100000 NO CYCLE").Error; err != nil {
+			return err
+		}
+
+		var totalUsers, usersWithoutNumber int64
+		if err := tx.Raw("SELECT COUNT(*) FROM users").Scan(&totalUsers).Error; err != nil {
+			return err
+		}
+		if totalUsers > 900000 {
+			return fmt.Errorf("%d accounts exceed the six-digit pilot-number capacity", totalUsers)
+		}
+		if err := tx.Raw("SELECT COUNT(*) FROM users WHERE pilot_number IS NULL").Scan(&usersWithoutNumber).Error; err != nil {
+			return err
+		}
+		var maximumNumber int
+		if err := tx.Raw("SELECT COALESCE(MAX(pilot_number), 99999) FROM users").Scan(&maximumNumber).Error; err != nil {
+			return err
+		}
+		if int64(maximumNumber)+usersWithoutNumber > 999999 {
+			return fmt.Errorf("pilot-number sequence has insufficient six-digit numbers")
+		}
+		if usersWithoutNumber > 0 {
+			if err := tx.Exec(`
+				WITH numbered_users AS (
+					SELECT id, (?::bigint + ROW_NUMBER() OVER (ORDER BY created_at, id))::integer AS pilot_number
+					FROM users
+					WHERE pilot_number IS NULL
+				)
+				UPDATE users AS target
+				SET pilot_number = numbered_users.pilot_number
+				FROM numbered_users
+				WHERE target.id = numbered_users.id
+			`, maximumNumber).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Exec("ALTER TABLE users ALTER COLUMN pilot_number SET DEFAULT nextval('pilot_number_seq')").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("ALTER TABLE users ALTER COLUMN pilot_number SET NOT NULL").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			DO $$ BEGIN
+				IF NOT EXISTS (
+					SELECT 1 FROM pg_constraint
+					WHERE conname = 'users_pilot_number_six_digits'
+				) THEN
+					ALTER TABLE users ADD CONSTRAINT users_pilot_number_six_digits
+					CHECK (pilot_number BETWEEN 100000 AND 999999);
+				END IF;
+			END $$;
+		`).Error; err != nil {
+			return err
+		}
+		if !sequenceExists {
+			var currentMaximum int
+			if err := tx.Raw("SELECT COALESCE(MAX(pilot_number), 100000) FROM users").Scan(&currentMaximum).Error; err != nil {
+				return err
+			}
+			sequenceHasValue := totalUsers > 0
+			if err := tx.Exec("SELECT setval('pilot_number_seq', ?, ?)", currentMaximum, sequenceHasValue).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Exec("ALTER SEQUENCE pilot_number_seq OWNED BY users.pilot_number").Error
+	})
 }

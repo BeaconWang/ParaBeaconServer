@@ -34,6 +34,8 @@ func (r *memoryUsers) Create(_ context.Context, user *model.User) error {
 		}
 	}
 	user.ID = uuid.New()
+	pilotNumber := 123456 + len(r.byID)
+	user.PilotNumber = &pilotNumber
 	user.CreatedAt = time.Now().UTC()
 	if user.Email != nil {
 		r.byEmail[*user.Email] = user
@@ -74,6 +76,9 @@ func TestAuthServiceRegisterLoginAndProfile(t *testing.T) {
 	}
 	if user.Username != "sky_rider" || user.Email == nil || *user.Email != "pilot@example.com" {
 		t.Fatalf("registration did not normalize identifiers: %#v", user)
+	}
+	if user.PilotNumber == nil || *user.PilotNumber < 100000 || *user.PilotNumber > 999999 {
+		t.Fatalf("registration pilot number = %v, want six digits", user.PilotNumber)
 	}
 	if strings.Contains(user.PasswordHash, "a-long-unique-passphrase") {
 		t.Fatal("stored password hash contains the plaintext password")

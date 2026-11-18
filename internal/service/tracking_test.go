@@ -139,7 +139,7 @@ func TestStartSessionStoresExplicitPublicSharingConsent(t *testing.T) {
 }
 
 func TestListPublicLocationsValidatesAndBoundsResults(t *testing.T) {
-	repository := &trackingTestRepository{locations: []model.PublicPilotLocation{{PilotName: "pilot_one"}}}
+	repository := &trackingTestRepository{locations: []model.PublicPilotLocation{{PilotName: "pilot_one", PilotNumber: 123456}}}
 	tracking := NewTrackingService(repository)
 	after := uuid.New()
 	requesterID := uuid.New()
@@ -169,7 +169,7 @@ func TestListPublicLocationsValidatesAndBoundsResults(t *testing.T) {
 func TestListPublicLocationsAttachesOnlyBoundedPublicTrailData(t *testing.T) {
 	sessionID := uuid.New()
 	repository := &trackingTestRepository{
-		locations: []model.PublicPilotLocation{{SessionID: sessionID, PilotName: "pilot_one"}},
+		locations: []model.PublicPilotLocation{{SessionID: sessionID, PilotNumber: 123456, PilotName: "pilot_one"}},
 		trackPoints: []model.PublicPilotTrackPoint{{
 			SessionID:   sessionID,
 			Latitude:    47.1,

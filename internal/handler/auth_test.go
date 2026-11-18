@@ -26,6 +26,10 @@ func (r *authTestUsers) Create(_ context.Context, user *model.User) error {
 	if user.ID == uuid.Nil {
 		user.ID = uuid.New()
 	}
+	if user.PilotNumber == nil {
+		pilotNumber := 123456
+		user.PilotNumber = &pilotNumber
+	}
 	if user.CreatedAt.IsZero() {
 		user.CreatedAt = time.Now().UTC()
 	}
@@ -136,5 +140,12 @@ func TestRegisterRequiresOnlyUsernameAndPassword(t *testing.T) {
 	}
 	if _, ok := response.User["email"]; ok {
 		t.Fatal("registration response unexpectedly includes an absent email")
+	}
+	var pilotNumber int
+	if err := json.Unmarshal(response.User["pilot_number"], &pilotNumber); err != nil {
+		t.Fatalf("decode pilot number: %v", err)
+	}
+	if pilotNumber != 123456 {
+		t.Fatalf("pilot number = %d, want 123456", pilotNumber)
 	}
 }
