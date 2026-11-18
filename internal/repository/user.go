@@ -2,11 +2,14 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type UserRepository interface {
@@ -15,6 +18,12 @@ type UserRepository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
 	UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error
 }
+
+type PasswordChangeRepository interface {
+	ChangePassword(ctx context.Context, id uuid.UUID, expectedHash, newHash string, changedAt time.Time) error
+}
+
+var ErrPasswordChanged = errors.New("password changed concurrently")
 
 type GormUserRepository struct {
 	db *gorm.DB
@@ -52,6 +61,27 @@ func (r *GormUserRepository) FindByID(ctx context.Context, id uuid.UUID) (*model
 		return nil, fmt.Errorf("find user by id: %w", err)
 	}
 	return &user, nil
+}
+
+func (r *GormUserRepository) ChangePassword(ctx context.Context, id uuid.UUID, expectedHash, newHash string, changedAt time.Time) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id, password_hash").First(&user, "id = ?", id).Error; err != nil {
+			return err
+		}
+		if user.PasswordHash != expectedHash {
+			return ErrPasswordChanged
+		}
+		if err := tx.Model(&model.User{}).
+			Where("id = ? AND password_hash = ?", id, expectedHash).
+			Update("password_hash", newHash).Error; err != nil {
+			return fmt.Errorf("update user password: %w", err)
+		}
+		return tx.Model(&model.RefreshToken{}).
+			Where("user_id = ? AND revoked_at IS NULL", id).
+			Update("revoked_at", changedAt).Error
+	})
 }
 
 func (r *GormUserRepository) UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error {

@@ -35,8 +35,11 @@ func (r *GormRefreshTokenRepository) CreateSession(ctx context.Context, token *m
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var user model.User
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Select("id").First(&user, "id = ?", token.UserID).Error; err != nil {
+			Select("id, password_hash").First(&user, "id = ?", token.UserID).Error; err != nil {
 			return err
+		}
+		if token.ExpectedPasswordHash != "" && user.PasswordHash != token.ExpectedPasswordHash {
+			return ErrPasswordChanged
 		}
 		now := time.Now().UTC()
 		if err := tx.Model(&model.RefreshToken{}).

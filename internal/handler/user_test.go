@@ -7,16 +7,20 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/middleware"
 	"github.com/parabeacon/server/internal/model"
+	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/internal/service"
+	"github.com/parabeacon/server/pkg/utils"
 )
 
 type profileTestUsers struct {
-	user *model.User
+	user            *model.User
+	sessionsRevoked bool
 }
 
 func (r *profileTestUsers) Create(_ context.Context, user *model.User) error {
@@ -32,6 +36,17 @@ func (r *profileTestUsers) FindByID(_ context.Context, id uuid.UUID) (*model.Use
 	}
 	copy := *r.user
 	return &copy, nil
+}
+func (r *profileTestUsers) ChangePassword(_ context.Context, id uuid.UUID, expectedHash, newHash string, _ time.Time) error {
+	if r.user == nil || r.user.ID != id {
+		return service.ErrNotFound
+	}
+	if r.user.PasswordHash != expectedHash {
+		return repository.ErrPasswordChanged
+	}
+	r.user.PasswordHash = newHash
+	r.sessionsRevoked = true
+	return nil
 }
 func (r *profileTestUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, displayName string) error {
 	if r.user == nil || r.user.ID != id {
@@ -74,6 +89,82 @@ func TestUpdateProfileDisplayNameRequiresAuthenticatedOwner(t *testing.T) {
 	}
 	if responseBody.User.DisplayName != "New Pilot" {
 		t.Fatalf("response display name = %q", responseBody.User.DisplayName)
+	}
+}
+
+func TestChangePasswordRequiresCurrentPasswordAndRevokesSessions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID := uuid.New()
+	oldHash, err := utils.HashPassword("old-pass-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := &profileTestUsers{user: &model.User{
+		ID: userID, Username: "pilot_one", PasswordHash: oldHash,
+	}}
+	handler := NewUserHandler(service.NewAuthService(users, nil))
+	engine := gin.New()
+	engine.POST("/change-password", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.ChangePassword(c)
+	})
+
+	request := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(
+		`{"current_password":"wrong-pass","new_password":"new-pass-456"}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong current password status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+	if users.sessionsRevoked || users.user.PasswordHash != oldHash {
+		t.Fatal("wrong current password changed credentials or revoked sessions")
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(
+		`{"current_password":"old-pass-123","new_password":"new-pass-456"}`,
+	))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("valid password change status = %d, want %d: %s", response.Code, http.StatusNoContent, response.Body.String())
+	}
+	if !users.sessionsRevoked || utils.VerifyPassword(users.user.PasswordHash, "new-pass-456") != nil {
+		t.Fatal("password was not changed and sessions revoked")
+	}
+	if strings.Contains(response.Body.String(), "new-pass-456") {
+		t.Fatal("response exposed the new password")
+	}
+}
+
+func TestChangePasswordRejectsInvalidNewPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID := uuid.New()
+	oldHash, _ := utils.HashPassword("old-pass-123")
+	users := &profileTestUsers{user: &model.User{ID: userID, PasswordHash: oldHash}}
+	handler := NewUserHandler(service.NewAuthService(users, nil))
+	engine := gin.New()
+	engine.POST("/change-password", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.ChangePassword(c)
+	})
+	for _, testCase := range []struct {
+		body       string
+		wantStatus int
+	}{
+		{body: `{"current_password":"old-pass-123","new_password":"short"}`, wantStatus: http.StatusBadRequest},
+		{body: `{"current_password":"old-pass-123","new_password":"old-pass-123"}`, wantStatus: http.StatusConflict},
+		{body: `{"current_password":"old-pass-123","new_password":"` + strings.Repeat("界", 25) + `"}`, wantStatus: http.StatusBadRequest},
+	} {
+		request := httptest.NewRequest(http.MethodPost, "/change-password", strings.NewReader(testCase.body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		if response.Code != testCase.wantStatus {
+			t.Errorf("body %q status = %d, want %d", testCase.body, response.Code, testCase.wantStatus)
+		}
 	}
 }
 

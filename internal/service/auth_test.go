@@ -9,13 +9,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/model"
+	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/pkg/utils"
 	"gorm.io/gorm"
 )
 
 type memoryUsers struct {
-	byEmail map[string]*model.User
-	byID    map[uuid.UUID]*model.User
+	byEmail         map[string]*model.User
+	byID            map[uuid.UUID]*model.User
+	sessionsRevoked bool
 }
 
 func newMemoryUsers() *memoryUsers {
@@ -64,6 +66,19 @@ func (r *memoryUsers) FindByID(_ context.Context, id uuid.UUID) (*model.User, er
 	return user, nil
 }
 
+func (r *memoryUsers) ChangePassword(_ context.Context, id uuid.UUID, expectedHash, newHash string, _ time.Time) error {
+	user, ok := r.byID[id]
+	if !ok {
+		return gorm.ErrRecordNotFound
+	}
+	if user.PasswordHash != expectedHash {
+		return repository.ErrPasswordChanged
+	}
+	user.PasswordHash = newHash
+	r.sessionsRevoked = true
+	return nil
+}
+
 func (r *memoryUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, displayName string) error {
 	user, ok := r.byID[id]
 	if !ok {
@@ -100,6 +115,47 @@ func TestAuthServiceUpdatesDisplayNameWithValidation(t *testing.T) {
 	updated, err = service.UpdateDisplayName(context.Background(), user.ID, "")
 	if err != nil || updated.DisplayName != "" {
 		t.Fatalf("clear display name = %#v, err=%v", updated, err)
+	}
+}
+
+func TestAuthServiceChangePasswordVerifiesCurrentPasswordAndRevokesSessions(t *testing.T) {
+	repo := newMemoryUsers()
+	service := NewAuthService(repo, utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute))
+	user, err := service.Register(context.Background(), "password_pilot", "", "old-pass-123")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	oldHash := user.PasswordHash
+
+	if err := service.ChangePassword(context.Background(), user.ID, "incorrect", "new-pass-456"); !errors.Is(err, ErrInvalidCurrentPassword) {
+		t.Fatalf("wrong current password error = %v", err)
+	}
+	if repo.byID[user.ID].PasswordHash != oldHash || repo.sessionsRevoked {
+		t.Fatal("wrong current password changed credentials or revoked sessions")
+	}
+	if err := service.ChangePassword(context.Background(), user.ID, "old-pass-123", "short"); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("short new password error = %v", err)
+	}
+	if err := service.ChangePassword(context.Background(), user.ID, "old-pass-123", "old-pass-123"); !errors.Is(err, ErrPasswordUnchanged) {
+		t.Fatalf("unchanged password error = %v", err)
+	}
+	if err := service.ChangePassword(context.Background(), user.ID, "old-pass-123", strings.Repeat("界", 25)); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("oversized UTF-8 password error = %v", err)
+	}
+	if err := service.ChangePassword(context.Background(), user.ID, "old-pass-123", "new-pass-456"); err != nil {
+		t.Fatalf("ChangePassword() error = %v", err)
+	}
+	if !repo.sessionsRevoked || utils.VerifyPassword(repo.byID[user.ID].PasswordHash, "new-pass-456") != nil {
+		t.Fatal("new password was not stored or sessions were not revoked")
+	}
+	if utils.VerifyPassword(repo.byID[user.ID].PasswordHash, "old-pass-123") == nil {
+		t.Fatal("old password still matches after change")
+	}
+	if _, err := service.Login(context.Background(), user.Username, "old-pass-123"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("old password login error = %v, want invalid credentials", err)
+	}
+	if _, err := service.Login(context.Background(), user.Username, "new-pass-456"); err != nil {
+		t.Fatalf("new password login error = %v", err)
 	}
 }
 

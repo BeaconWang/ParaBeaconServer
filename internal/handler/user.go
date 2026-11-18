@@ -22,6 +22,51 @@ type updateProfileRequest struct {
 	DisplayName *string `json:"display_name"`
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+func (h *UserHandler) ChangePassword(c *gin.Context) {
+	userID, ok := authenticatedUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var request changePasswordRequest
+	if err := c.ShouldBindJSON(&request); err != nil || request.CurrentPassword == "" || request.NewPassword == "" {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.auth.ChangePassword(c.Request.Context(), userID, request.CurrentPassword, request.NewPassword); err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidCurrentPassword):
+			respondError(c, http.StatusUnauthorized, "current password is incorrect")
+		case errors.Is(err, service.ErrPasswordUnchanged):
+			respondError(c, http.StatusConflict, "new password must differ from current password")
+		case errors.Is(err, service.ErrInvalidInput):
+			respondError(c, http.StatusBadRequest, "invalid new password")
+		case errors.Is(err, service.ErrPasswordChangeUnavailable):
+			respondError(c, http.StatusServiceUnavailable, "password change unavailable")
+		case errors.Is(err, service.ErrNotFound):
+			respondError(c, http.StatusNotFound, "user not found")
+		default:
+			respondInternalError(c)
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func authenticatedUserID(c *gin.Context) (uuid.UUID, bool) {
+	value, ok := c.Get(middleware.AuthenticatedUserIDKey)
+	if !ok {
+		return uuid.Nil, false
+	}
+	userID, ok := value.(uuid.UUID)
+	return userID, ok && userID != uuid.Nil
+}
+
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	value, ok := c.Get(middleware.AuthenticatedUserIDKey)
 	if !ok {

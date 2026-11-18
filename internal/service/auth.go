@@ -22,13 +22,16 @@ import (
 )
 
 var (
-	ErrConflict           = errors.New("username or email already exists")
-	ErrInvalidDisplayName = errors.New("invalid display name")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrInvalidInput       = errors.New("invalid registration input")
-	ErrNotFound           = errors.New("user not found")
-	ErrInvalidRefresh     = repository.ErrInvalidRefreshToken
-	usernamePattern       = regexp.MustCompile(`^[a-zA-Z0-9_]{3,32}$`)
+	ErrConflict                  = errors.New("username or email already exists")
+	ErrInvalidDisplayName        = errors.New("invalid display name")
+	ErrInvalidCredentials        = errors.New("invalid email or password")
+	ErrInvalidCurrentPassword    = errors.New("invalid current password")
+	ErrPasswordUnchanged         = errors.New("new password must differ from current password")
+	ErrPasswordChangeUnavailable = errors.New("password change unavailable")
+	ErrInvalidInput              = errors.New("invalid registration input")
+	ErrNotFound                  = errors.New("user not found")
+	ErrInvalidRefresh            = repository.ErrInvalidRefreshToken
+	usernamePattern              = regexp.MustCompile(`^[a-zA-Z0-9_]{3,32}$`)
 )
 
 const MinPasswordCharacters = 6
@@ -107,6 +110,46 @@ func (s *AuthService) UpdateDisplayName(ctx context.Context, userID uuid.UUID, d
 	return user, nil
 }
 
+func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, currentPassword, newPassword string) error {
+	if userID == uuid.Nil {
+		return ErrNotFound
+	}
+	if utf8.RuneCountInString(newPassword) < MinPasswordCharacters || len(newPassword) > utils.MaxPasswordBytes {
+		return ErrInvalidInput
+	}
+	user, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if err := utils.VerifyPassword(user.PasswordHash, currentPassword); err != nil {
+		return ErrInvalidCurrentPassword
+	}
+	if err := utils.VerifyPassword(user.PasswordHash, newPassword); err == nil {
+		return ErrPasswordUnchanged
+	}
+	passwordRepository, ok := s.users.(repository.PasswordChangeRepository)
+	if !ok {
+		return ErrPasswordChangeUnavailable
+	}
+	newHash, err := utils.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	if err := passwordRepository.ChangePassword(ctx, userID, user.PasswordHash, newHash, time.Now().UTC()); err != nil {
+		if errors.Is(err, repository.ErrPasswordChanged) {
+			return ErrInvalidCurrentPassword
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *AuthService) Login(ctx context.Context, identifier, password string) (*AuthResult, error) {
 	identifier = strings.ToLower(strings.TrimSpace(identifier))
 	user, err := s.users.FindByLogin(ctx, identifier)
@@ -137,10 +180,14 @@ func (s *AuthService) Login(ctx context.Context, identifier, password string) (*
 		return nil, err
 	}
 	if err := s.refreshTokens.CreateSession(ctx, &model.RefreshToken{
-		ID:        sessionID,
-		UserID:    user.ID,
-		TokenHash: tokenHash,
+		ID:                   sessionID,
+		UserID:               user.ID,
+		TokenHash:            tokenHash,
+		ExpectedPasswordHash: user.PasswordHash,
 	}); err != nil {
+		if errors.Is(err, repository.ErrPasswordChanged) {
+			return nil, ErrInvalidCredentials
+		}
 		return nil, err
 	}
 	return &AuthResult{
