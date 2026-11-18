@@ -17,10 +17,16 @@ import (
 	"gorm.io/gorm"
 )
 
-func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, tokens *utils.TokenManager, hubs ...*realtime.Hub) (*gin.Engine, error) {
-	liveHub := realtime.NewHub(nil, nil, nil)
-	if len(hubs) > 0 && hubs[0] != nil {
-		liveHub = hubs[0]
+func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, tokens *utils.TokenManager, liveHub *realtime.Hub, chatHubs ...*realtime.ChatHub) (*gin.Engine, error) {
+	if liveHub == nil {
+		liveHub = realtime.NewHub(nil, nil, nil)
+	}
+	var chatHub *realtime.ChatHub
+	if len(chatHubs) > 0 {
+		chatHub = chatHubs[0]
+	}
+	if chatHub == nil {
+		chatHub = realtime.NewChatHub(nil, nil, nil)
 	}
 	if cfg.Environment != "development" && cfg.Environment != "test" {
 		gin.SetMode(gin.ReleaseMode)
@@ -67,6 +73,8 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	trackingRepo := repository.NewTrackingRepository(db)
 	trackingService := service.NewTrackingService(trackingRepo)
 	trackingHandler := handler.NewTrackingHandler(trackingService, liveHub)
+	chatService := service.NewChatService(repository.NewChatRepository(db))
+	chatHandler := handler.NewChatHandler(chatService, chatHub)
 	flightLogRepo := repository.NewFlightLogRepository(db)
 	flightArchiveStorage, err := service.NewFlightArchiveStorage(cfg.FlightLogStorageDir)
 	if err != nil {
@@ -125,7 +133,9 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.POST("/flight-logs/syncs/:sync_id/commit", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), flightLogHandler.CommitSync)
 		protected.GET("/landing-points", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), landingPointHandler.List)
 		protected.POST("/landing-points", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), landingPointHandler.Import)
-		protected.GET("/chat", handler.NotImplemented("chat_im"))
+		protected.GET("/chat/messages", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), chatHandler.ListMessages)
+		protected.POST("/chat/socket-ticket", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), chatHandler.IssueSocketTicket)
+		v1.GET("/chat/ws", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), chatHandler.WebSocket(cfg.CORSAllowedOrigin))
 	}
 	return engine, nil
 }

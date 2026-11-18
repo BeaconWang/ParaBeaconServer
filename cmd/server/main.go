@@ -76,7 +76,10 @@ func run() error {
 	liveHub := realtime.NewHub(redisClient, flightLifecycle, logger)
 	liveHub.Start()
 	defer liveHub.Close()
-	engine, err := router.New(cfg, db, authService, tokens, liveHub)
+	chatHub := realtime.NewChatHub(redisClient, service.NewChatService(repository.NewChatRepository(db)), logger)
+	chatHub.Start()
+	defer chatHub.Close()
+	engine, err := router.New(cfg, db, authService, tokens, liveHub, chatHub)
 	if err != nil {
 		return fmt.Errorf("configure HTTP routes: %w", err)
 	}
