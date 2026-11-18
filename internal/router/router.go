@@ -101,7 +101,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		v1.GET("/admin/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.List)
 		v1.DELETE("/admin/app/releases/:version_code", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Delete)
 		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Publish)
-		v1.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), trackingHandler.ListPublicLocations)
+		v1.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), trackingHandler.ListPublicLocations)
 
 		protected := v1.Group("")
 		protected.Use(middleware.RequireAuth(tokens, repository.NewRefreshTokenRepository(db)))

@@ -17,6 +17,17 @@ type ActiveSessionValidator interface {
 	IsActiveSession(ctx context.Context, sessionID, userID uuid.UUID, now time.Time) (bool, error)
 }
 
+func OptionalAuth(tokens *utils.TokenManager, validators ...ActiveSessionValidator) gin.HandlerFunc {
+	requireAuth := RequireAuth(tokens, validators...)
+	return func(c *gin.Context) {
+		if strings.TrimSpace(c.GetHeader("Authorization")) == "" {
+			c.Next()
+			return
+		}
+		requireAuth(c)
+	}
+}
+
 func RequireAuth(tokens *utils.TokenManager, validators ...ActiveSessionValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
