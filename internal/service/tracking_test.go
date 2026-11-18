@@ -56,18 +56,24 @@ func TestValidateTrackingPoint(t *testing.T) {
 }
 
 type trackingTestRepository struct {
-	created       *model.LiveTrackSession
-	sharingUserID uuid.UUID
-	sharingID     uuid.UUID
-	sharing       bool
-	queryUserID   uuid.UUID
-	bounds        [4]float64
-	after         uuid.UUID
-	limit         int
-	observedSince time.Time
-	observedUntil time.Time
-	locations     []model.PublicPilotLocation
-	listCalled    bool
+	created              *model.LiveTrackSession
+	sharingUserID        uuid.UUID
+	sharingID            uuid.UUID
+	sharing              bool
+	queryUserID          uuid.UUID
+	bounds               [4]float64
+	after                uuid.UUID
+	limit                int
+	observedSince        time.Time
+	observedUntil        time.Time
+	locations            []model.PublicPilotLocation
+	listCalled           bool
+	trackPointSessionIDs []uuid.UUID
+	trackPointSince      time.Time
+	trackPointUntil      time.Time
+	trackPointLimit      int
+	trackPoints          []model.PublicPilotTrackPoint
+	trackPointsCalled    bool
 }
 
 func (r *trackingTestRepository) CreateSession(_ context.Context, session *model.LiveTrackSession) error {
@@ -103,6 +109,15 @@ func (r *trackingTestRepository) ListPublicLocations(_ context.Context, userID u
 	r.observedSince = observedSince
 	r.observedUntil = observedUntil
 	return r.locations, nil
+}
+
+func (r *trackingTestRepository) ListPublicTrackPoints(_ context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error) {
+	r.trackPointsCalled = true
+	r.trackPointSessionIDs = sessionIDs
+	r.trackPointSince = observedSince
+	r.trackPointUntil = observedUntil
+	r.trackPointLimit = limitPerSession
+	return r.trackPoints, nil
 }
 
 func TestStartSessionStoresExplicitPublicSharingConsent(t *testing.T) {
@@ -148,6 +163,41 @@ func TestListPublicLocationsValidatesAndBoundsResults(t *testing.T) {
 		repository.observedUntil.Before(now) ||
 		repository.observedUntil.After(now.Add(6*time.Second)) {
 		t.Fatalf("freshness window = %s..%s", repository.observedSince, repository.observedUntil)
+	}
+}
+
+func TestListPublicLocationsAttachesOnlyBoundedPublicTrailData(t *testing.T) {
+	sessionID := uuid.New()
+	repository := &trackingTestRepository{
+		locations: []model.PublicPilotLocation{{SessionID: sessionID, PilotName: "pilot_one"}},
+		trackPoints: []model.PublicPilotTrackPoint{{
+			SessionID:   sessionID,
+			Latitude:    47.1,
+			Longitude:   8.5,
+			Altitude:    1200,
+			GroundSpeed: 12,
+			Timestamp:   time.Now().UTC(),
+		}},
+	}
+	tracking := NewTrackingService(repository)
+
+	locations, err := tracking.ListPublicLocations(context.Background(), uuid.New(), -10, 10, 170, -170, uuid.Nil)
+	if err != nil {
+		t.Fatalf("ListPublicLocations() error = %v", err)
+	}
+	if !repository.trackPointsCalled || len(repository.trackPointSessionIDs) != 1 || repository.trackPointSessionIDs[0] != sessionID {
+		t.Fatalf("track point query sessions = %v", repository.trackPointSessionIDs)
+	}
+	if repository.trackPointLimit != PublicTrackMaxPoints {
+		t.Fatalf("track point limit = %d, want %d", repository.trackPointLimit, PublicTrackMaxPoints)
+	}
+	if len(locations) != 1 || len(locations[0].Path) != 1 || locations[0].Path[0].SessionID != sessionID {
+		t.Fatalf("public pilot path = %#v", locations)
+	}
+	now := time.Now().UTC()
+	if repository.trackPointSince.Before(now.Add(-PublicTrackMaxAge-time.Second)) ||
+		repository.trackPointSince.After(now.Add(-PublicTrackMaxAge+time.Second)) {
+		t.Fatalf("track point history starts at %s", repository.trackPointSince)
 	}
 }
 

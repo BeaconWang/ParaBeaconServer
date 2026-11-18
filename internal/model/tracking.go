@@ -18,12 +18,27 @@ type LiveTrackSession struct {
 }
 
 type PublicPilotLocation struct {
-	SessionID  uuid.UUID `gorm:"column:session_id" json:"-"`
-	PilotName  string    `gorm:"column:pilot_name" json:"pilot_name"`
-	Latitude   float64   `gorm:"column:latitude" json:"lat"`
-	Longitude  float64   `gorm:"column:longitude" json:"lon"`
-	Heading    *float64  `gorm:"column:heading" json:"heading,omitempty"`
-	ObservedAt time.Time `gorm:"column:observed_at" json:"observed_at"`
+	SessionID     uuid.UUID               `gorm:"column:session_id" json:"-"`
+	PilotName     string                  `gorm:"column:pilot_name" json:"pilot_name"`
+	Latitude      float64                 `gorm:"column:latitude" json:"lat"`
+	Longitude     float64                 `gorm:"column:longitude" json:"lon"`
+	Altitude      float64                 `gorm:"column:altitude" json:"altitude"`
+	GroundSpeed   float64                 `gorm:"column:ground_speed" json:"speed"`
+	VerticalSpeed *float64                `gorm:"column:vertical_speed" json:"vertical_speed,omitempty"`
+	Heading       *float64                `gorm:"column:heading" json:"heading,omitempty"`
+	ObservedAt    time.Time               `gorm:"column:observed_at" json:"observed_at"`
+	Path          []PublicPilotTrackPoint `gorm:"-" json:"path"`
+}
+
+type PublicPilotTrackPoint struct {
+	SessionID     uuid.UUID `gorm:"column:session_id" json:"-"`
+	Latitude      float64   `gorm:"column:latitude" json:"lat"`
+	Longitude     float64   `gorm:"column:longitude" json:"lon"`
+	Altitude      float64   `gorm:"column:altitude" json:"altitude"`
+	GroundSpeed   float64   `gorm:"column:ground_speed" json:"speed"`
+	VerticalSpeed *float64  `gorm:"column:vertical_speed" json:"vertical_speed,omitempty"`
+	Heading       *float64  `gorm:"column:heading" json:"heading,omitempty"`
+	Timestamp     time.Time `gorm:"column:timestamp" json:"timestamp"`
 }
 
 type LiveTrackPoint struct {

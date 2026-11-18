@@ -58,15 +58,26 @@ func (s *trackingHandlerTestService) ListPublicLocations(_ context.Context, user
 	return s.locations, nil
 }
 
-func TestListPublicLocationsRequiresBoundsAndReturnsOnlyMapFields(t *testing.T) {
+func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	sessionID := uuid.New()
 	service := &trackingHandlerTestService{
 		locations: []model.PublicPilotLocation{{
-			SessionID:  uuid.New(),
-			PilotName:  "pilot_one",
-			Latitude:   47.1,
-			Longitude:  8.5,
-			ObservedAt: time.Now().UTC(),
+			SessionID:   sessionID,
+			PilotName:   "pilot_one",
+			Latitude:    47.1,
+			Longitude:   8.5,
+			Altitude:    1200,
+			GroundSpeed: 12,
+			ObservedAt:  time.Now().UTC(),
+			Path: []model.PublicPilotTrackPoint{{
+				SessionID:   sessionID,
+				Latitude:    47.1,
+				Longitude:   8.5,
+				Altitude:    1200,
+				GroundSpeed: 12,
+				Timestamp:   time.Now().UTC(),
+			}},
 		}},
 	}
 	userID := uuid.New()
@@ -98,13 +109,25 @@ func TestListPublicLocationsRequiresBoundsAndReturnsOnlyMapFields(t *testing.T) 
 	if len(locations) != 1 {
 		t.Fatalf("location count = %d, want 1", len(locations))
 	}
-	for _, privateField := range []string{"session_id", "user_id", "id", "altitude", "speed"} {
+	for _, privateField := range []string{"session_id", "user_id", "id", "gps_accuracy", "pressure"} {
 		if _, exists := locations[0][privateField]; exists {
 			t.Errorf("public location unexpectedly contains %q", privateField)
 		}
 	}
-	if _, exists := locations[0]["pilot_name"]; !exists {
-		t.Fatal("public location has no pilot display name")
+	for _, sharedField := range []string{"pilot_name", "altitude", "speed", "path"} {
+		if _, exists := locations[0][sharedField]; !exists {
+			t.Errorf("public location has no shared flight field %q", sharedField)
+		}
+	}
+	var path []map[string]json.RawMessage
+	if err := json.Unmarshal(locations[0]["path"], &path); err != nil {
+		t.Fatalf("decode public flight path: %v", err)
+	}
+	if len(path) != 1 {
+		t.Fatalf("public path point count = %d, want 1", len(path))
+	}
+	if _, exists := path[0]["session_id"]; exists {
+		t.Fatal("public path unexpectedly contains a session id")
 	}
 }
 

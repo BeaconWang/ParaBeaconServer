@@ -23,6 +23,7 @@ type TrackingRepository interface {
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
 	ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
+	ListPublicTrackPoints(ctx context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error)
 }
 
 type GormTrackingRepository struct {
@@ -110,8 +111,8 @@ func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID
 	locations := make([]model.PublicPilotLocation, 0, limit)
 	query := r.db.WithContext(ctx).
 		Table("live_track_sessions AS s").
-		Select("s.id AS session_id, s.pilot_name, latest.latitude, latest.longitude, latest.heading, latest.timestamp AS observed_at").
-		Joins("JOIN LATERAL (SELECT p.latitude, p.longitude, p.heading, p.timestamp FROM live_track_points p WHERE p.session_id = s.id ORDER BY p.timestamp DESC LIMIT 1) AS latest ON TRUE").
+		Select("s.id AS session_id, s.pilot_name, latest.latitude, latest.longitude, latest.altitude, latest.ground_speed, latest.vertical_speed, latest.heading, latest.timestamp AS observed_at").
+		Joins("JOIN LATERAL (SELECT p.latitude, p.longitude, p.altitude, p.ground_speed, p.vertical_speed, p.heading, p.timestamp FROM live_track_points p WHERE p.session_id = s.id ORDER BY p.timestamp DESC LIMIT 1) AS latest ON TRUE").
 		Where("s.ended_at IS NULL AND s.publicly_share = ?", true).
 		Where("latest.timestamp >= ? AND latest.timestamp <= ?", observedSince, observedUntil).
 		Where("latest.latitude BETWEEN ? AND ?", south, north)
@@ -130,6 +131,29 @@ func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID
 		return nil, err
 	}
 	return locations, nil
+}
+
+func (r *GormTrackingRepository) ListPublicTrackPoints(ctx context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error) {
+	if len(sessionIDs) == 0 || limitPerSession < 1 {
+		return []model.PublicPilotTrackPoint{}, nil
+	}
+	rankedPoints := r.db.WithContext(ctx).
+		Table("live_track_points AS p").
+		Select("p.session_id, p.latitude, p.longitude, p.altitude, p.ground_speed, p.vertical_speed, p.heading, p.timestamp, ROW_NUMBER() OVER (PARTITION BY p.session_id ORDER BY p.timestamp DESC) AS point_rank").
+		Joins("JOIN live_track_sessions AS s ON s.id = p.session_id").
+		Where("p.session_id IN ?", sessionIDs).
+		Where("s.ended_at IS NULL AND s.publicly_share = ?", true).
+		Where("p.timestamp >= ? AND p.timestamp <= ?", observedSince, observedUntil)
+	points := make([]model.PublicPilotTrackPoint, 0, len(sessionIDs)*limitPerSession)
+	err := r.db.WithContext(ctx).
+		Table("(?) AS ranked_points", rankedPoints).
+		Where("point_rank <= ?", limitPerSession).
+		Order("session_id ASC, timestamp ASC").
+		Scan(&points).Error
+	if err != nil {
+		return nil, err
+	}
+	return points, nil
 }
 
 func (r *GormTrackingRepository) ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error) {

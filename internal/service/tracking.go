@@ -19,8 +19,10 @@ var (
 
 const (
 	MaxTrackingBatchSize   = 100
-	PublicLocationPageSize = 500
+	PublicLocationPageSize = 100
 	PublicLocationMaxAge   = 90 * time.Second
+	PublicTrackMaxAge      = 20 * time.Minute
+	PublicTrackMaxPoints   = 300
 )
 
 type TrackingRepository interface {
@@ -30,6 +32,7 @@ type TrackingRepository interface {
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
 	ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
+	ListPublicTrackPoints(ctx context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error)
 }
 
 type TrackingService struct {
@@ -97,7 +100,8 @@ func (s *TrackingService) ListPublicLocations(ctx context.Context, userID uuid.U
 		return nil, ErrInvalidTrackingData
 	}
 	now := time.Now().UTC()
-	return s.tracking.ListPublicLocations(
+	observedUntil := now.Add(5 * time.Second)
+	locations, err := s.tracking.ListPublicLocations(
 		ctx,
 		userID,
 		south,
@@ -107,8 +111,35 @@ func (s *TrackingService) ListPublicLocations(ctx context.Context, userID uuid.U
 		after,
 		PublicLocationPageSize,
 		now.Add(-PublicLocationMaxAge),
-		now.Add(5*time.Second),
+		observedUntil,
 	)
+	if err != nil || len(locations) == 0 {
+		return locations, err
+	}
+
+	sessionIDs := make([]uuid.UUID, 0, len(locations))
+	locationIndexes := make(map[uuid.UUID]int, len(locations))
+	for index := range locations {
+		locations[index].Path = []model.PublicPilotTrackPoint{}
+		sessionIDs = append(sessionIDs, locations[index].SessionID)
+		locationIndexes[locations[index].SessionID] = index
+	}
+	trackPoints, err := s.tracking.ListPublicTrackPoints(
+		ctx,
+		sessionIDs,
+		now.Add(-PublicTrackMaxAge),
+		observedUntil,
+		PublicTrackMaxPoints,
+	)
+	if err != nil {
+		return nil, err
+	}
+	for _, point := range trackPoints {
+		if index, ok := locationIndexes[point.SessionID]; ok {
+			locations[index].Path = append(locations[index].Path, point)
+		}
+	}
+	return locations, nil
 }
 
 func (s *TrackingService) ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error) {
