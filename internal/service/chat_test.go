@@ -14,8 +14,9 @@ import (
 )
 
 type memoryChatRepository struct {
-	users    map[uuid.UUID]repository.ChatUser
-	messages []model.ChatMessage
+	users          map[uuid.UUID]repository.ChatUser
+	messages       []model.ChatMessage
+	locationStatus map[int]bool
 }
 
 func (r *memoryChatRepository) FindChatUserByID(_ context.Context, id uuid.UUID) (*repository.ChatUser, error) {
@@ -35,6 +36,10 @@ func (r *memoryChatRepository) FindChatUserByPilotNumber(_ context.Context, numb
 		}
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func (r *memoryChatRepository) HasFreshPublicLocation(_ context.Context, pilotNumber int, _, _ time.Time) (bool, error) {
+	return r.locationStatus[pilotNumber], nil
 }
 
 func (r *memoryChatRepository) CreateChatMessage(_ context.Context, message *model.ChatMessage) error {
@@ -78,6 +83,34 @@ func (r *memoryChatRepository) list(matches func(model.ChatMessage) bool, before
 		rows = rows[:limit]
 	}
 	return rows
+}
+
+func TestPublicLocationStatusOnlyReportsFreshPublicPartnerLocation(t *testing.T) {
+	requesterID, partnerID := uuid.New(), uuid.New()
+	repository := &memoryChatRepository{
+		users: map[uuid.UUID]repository.ChatUser{
+			requesterID: {ID: requesterID, PilotNumber: 123456, Username: "requester"},
+			partnerID:   {ID: partnerID, PilotNumber: 234567, Username: "partner"},
+		},
+		locationStatus: map[int]bool{234567: true},
+	}
+	chat := NewChatService(repository)
+
+	sharing, err := chat.PublicLocationStatus(context.Background(), requesterID, 234567)
+	if err != nil || !sharing {
+		t.Fatalf("partner status = %v, err=%v; want sharing", sharing, err)
+	}
+	sharing, err = chat.PublicLocationStatus(context.Background(), requesterID, 123456)
+	if err != nil || sharing {
+		t.Fatalf("self status = %v, err=%v; want not sharing", sharing, err)
+	}
+	sharing, err = chat.PublicLocationStatus(context.Background(), requesterID, 345678)
+	if err != nil || sharing {
+		t.Fatalf("unknown pilot status = %v, err=%v; want false without revealing existence", sharing, err)
+	}
+	if _, err := chat.PublicLocationStatus(context.Background(), uuid.Nil, 234567); !errors.Is(err, ErrInvalidChatRequest) {
+		t.Fatalf("anonymous status error = %v, want invalid request", err)
+	}
 }
 
 func TestChatRoutesPublicChannelAndDirectMessages(t *testing.T) {

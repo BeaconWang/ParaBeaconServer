@@ -25,6 +25,7 @@ type ChatRepository interface {
 	ListPublicChat(context.Context, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
 	ListChannelChat(context.Context, int, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
 	ListDirectChat(context.Context, uuid.UUID, uuid.UUID, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
+	HasFreshPublicLocation(context.Context, int, time.Time, time.Time) (bool, error)
 }
 
 type GormChatRepository struct {
@@ -57,6 +58,35 @@ func (r *GormChatRepository) FindChatUserByPilotNumber(ctx context.Context, numb
 		return nil, fmt.Errorf("find chat pilot: %w", err)
 	}
 	return &user, nil
+}
+
+func (r *GormChatRepository) HasFreshPublicLocation(ctx context.Context, pilotNumber int, observedSince, observedUntil time.Time) (bool, error) {
+	var status struct {
+		Sharing bool `gorm:"column:sharing"`
+	}
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT EXISTS (
+			SELECT 1
+			FROM users AS u
+			JOIN live_track_sessions AS s ON s.user_id = u.id
+			JOIN LATERAL (
+				SELECT p.timestamp
+				FROM live_track_points AS p
+				WHERE p.session_id = s.id
+				ORDER BY p.timestamp DESC
+				LIMIT 1
+			) AS latest ON TRUE
+			WHERE u.pilot_number = ?
+				AND s.ended_at IS NULL
+				AND s.publicly_share = TRUE
+				AND latest.timestamp >= ?
+				AND latest.timestamp <= ?
+		) AS sharing
+	`, pilotNumber, observedSince, observedUntil).Scan(&status).Error
+	if err != nil {
+		return false, fmt.Errorf("check pilot public location status: %w", err)
+	}
+	return status.Sharing, nil
 }
 
 func (r *GormChatRepository) CreateChatMessage(ctx context.Context, message *model.ChatMessage) error {

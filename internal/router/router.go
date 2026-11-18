@@ -136,6 +136,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.GET("/landing-points", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), landingPointHandler.List)
 		protected.POST("/landing-points", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), landingPointHandler.Import)
 		protected.GET("/chat/messages", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), chatHandler.ListMessages)
+		protected.GET("/chat/pilots/:pilot_number/location-status", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), chatHandler.PilotLocationStatus)
 		protected.POST("/chat/socket-ticket", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), chatHandler.IssueSocketTicket)
 		v1.GET("/chat/ws", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), chatHandler.WebSocket(cfg.CORSAllowedOrigin))
 	}

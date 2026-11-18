@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	ChatScopePublic  = "public"
-	ChatScopeChannel = "channel"
-	ChatScopeDirect  = "direct"
-	ChatMaxTextRunes = 1000
+	ChatScopePublic          = "public"
+	ChatScopeChannel         = "channel"
+	ChatScopeDirect          = "direct"
+	ChatMaxTextRunes         = 1000
+	ChatLocationStatusMaxAge = 90 * time.Second
 )
 
 var (
@@ -154,6 +155,29 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 		return ChatMessage{}, err
 	}
 	return chatMessageFromModel(message), nil
+}
+
+func (s *ChatService) PublicLocationStatus(ctx context.Context, requesterID uuid.UUID, pilotNumber int) (bool, error) {
+	if requesterID == uuid.Nil || pilotNumber < 100000 || pilotNumber > 999999 {
+		return false, ErrInvalidChatRequest
+	}
+	pilot, err := s.repository.FindChatUserByPilotNumber(ctx, pilotNumber)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if pilot.ID == requesterID {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	return s.repository.HasFreshPublicLocation(
+		ctx,
+		pilotNumber,
+		now.Add(-ChatLocationStatusMaxAge),
+		now.Add(5*time.Second),
+	)
 }
 
 func (s *ChatService) SubscribePeer(ctx context.Context, userID uuid.UUID, number int) (uuid.UUID, error) {

@@ -39,6 +39,25 @@ func (h *ChatHandler) WebSocket(allowedOrigins []string) gin.HandlerFunc {
 	return h.hub.ServeHTTP(allowedOrigins)
 }
 
+func (h *ChatHandler) PilotLocationStatus(c *gin.Context) {
+	userID, ok := chatRequesterID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	pilotNumber, err := strconv.Atoi(c.Param("pilot_number"))
+	if err != nil || pilotNumber < 100000 || pilotNumber > 999999 {
+		respondError(c, http.StatusBadRequest, "invalid pilot number")
+		return
+	}
+	sharing, err := h.chat.PublicLocationStatus(c.Request.Context(), userID, pilotNumber)
+	if err != nil {
+		respondChatError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"actively_sharing_location": sharing})
+}
+
 func (h *ChatHandler) ListMessages(c *gin.Context) {
 	userID, ok := chatRequesterID(c)
 	if !ok {
