@@ -36,7 +36,7 @@ type FlightLogSyncRecord struct {
 	RecordIndex int        `gorm:"primaryKey"`
 	StartedAt   time.Time  `gorm:"not null;uniqueIndex:idx_flight_log_sync_record_identity,priority:2"`
 	PointCount  int        `gorm:"not null;uniqueIndex:idx_flight_log_sync_record_identity,priority:3"`
-	ArchiveID   *uuid.UUID `gorm:"type:uuid;uniqueIndex"`
+	ArchiveID   *uuid.UUID `gorm:"type:uuid"`
 	Data        string     `gorm:"type:jsonb;not null"`
 	CreatedAt   time.Time
 }

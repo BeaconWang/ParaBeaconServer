@@ -9,6 +9,7 @@ import (
 	"github.com/parabeacon/server/internal/config"
 	"github.com/parabeacon/server/internal/handler"
 	"github.com/parabeacon/server/internal/middleware"
+	"github.com/parabeacon/server/internal/realtime"
 	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/internal/service"
 	webapp "github.com/parabeacon/server/internal/web"
@@ -16,7 +17,11 @@ import (
 	"gorm.io/gorm"
 )
 
-func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, tokens *utils.TokenManager) (*gin.Engine, error) {
+func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, tokens *utils.TokenManager, hubs ...*realtime.Hub) (*gin.Engine, error) {
+	liveHub := realtime.NewHub(nil, nil, nil)
+	if len(hubs) > 0 && hubs[0] != nil {
+		liveHub = hubs[0]
+	}
 	if cfg.Environment != "development" && cfg.Environment != "test" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -61,7 +66,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	userHandler := handler.NewUserHandler(authService)
 	trackingRepo := repository.NewTrackingRepository(db)
 	trackingService := service.NewTrackingService(trackingRepo)
-	trackingHandler := handler.NewTrackingHandler(trackingService)
+	trackingHandler := handler.NewTrackingHandler(trackingService, liveHub)
 	flightLogRepo := repository.NewFlightLogRepository(db)
 	flightArchiveStorage, err := service.NewFlightArchiveStorage(cfg.FlightLogStorageDir)
 	if err != nil {
@@ -102,6 +107,11 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.Use(middleware.RequireAuth(tokens, repository.NewRefreshTokenRepository(db)))
 		protected.GET("/user/profile", userHandler.Profile)
 		protected.GET("/tracking", trackingHandler.ListActive)
+		protected.GET("/tracking/live", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), realtime.NewWebSocketHandler(
+			liveHub,
+			cfg.CORSAllowedOrigin,
+			repository.NewLiveRoomAuthorizer(db),
+		))
 		protected.POST("/tracking/sessions", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), trackingHandler.Start)
 		protected.POST("/tracking/sessions/:session_id/points", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), trackingHandler.AddPoints)
 		protected.PATCH("/tracking/sessions/:session_id/public-sharing", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), trackingHandler.SetPublicSharing)

@@ -3,6 +3,8 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -25,6 +27,9 @@ type Config struct {
 	APKPackageName       string
 	APKReleaseAdminToken string
 	FlightLogStorageDir  string
+	COSBucketURL         string
+	COSSecretID          string
+	COSSecretKey         string
 }
 
 func Load() (Config, error) {
@@ -43,15 +48,29 @@ func Load() (Config, error) {
 	if err != nil || portNumber < 1 || portNumber > 65535 {
 		return Config{}, fmt.Errorf("HTTP_PORT must be an integer between 1 and 65535")
 	}
+	httpHost := strings.TrimSpace(os.Getenv("HTTP_HOST"))
 
 	expiry, err := time.ParseDuration(env("JWT_EXPIRY", "15m"))
 	if err != nil || expiry <= 0 {
 		return Config{}, fmt.Errorf("JWT_EXPIRY must be a positive duration")
 	}
 
+	cosBucketURL := strings.TrimSpace(os.Getenv("COS_BUCKET_URL"))
+	cosSecretID := strings.TrimSpace(os.Getenv("COS_SECRET_ID"))
+	cosSecretKey := strings.TrimSpace(os.Getenv("COS_SECRET_KEY"))
+	cosConfigured := cosBucketURL != "" || cosSecretID != "" || cosSecretKey != ""
+	if cosConfigured && (cosBucketURL == "" || cosSecretID == "" || cosSecretKey == "") {
+		return Config{}, fmt.Errorf("COS_BUCKET_URL, COS_SECRET_ID and COS_SECRET_KEY must be configured together")
+	}
+	if cosConfigured {
+		if err := validateCOSBucketURL(cosBucketURL); err != nil {
+			return Config{}, err
+		}
+	}
+
 	cfg := Config{
 		Environment:          environment,
-		HTTPAddress:          ":" + port,
+		HTTPAddress:          net.JoinHostPort(httpHost, port),
 		DatabaseDSN:          databaseDSN,
 		RedisURL:             strings.TrimSpace(os.Getenv("REDIS_URL")),
 		JWTSecret:            os.Getenv("JWT_SECRET"),
@@ -63,6 +82,9 @@ func Load() (Config, error) {
 		APKPackageName:       env("APK_PACKAGE_NAME", "com.beacon.parabeacon"),
 		APKReleaseAdminToken: os.Getenv("APK_RELEASE_ADMIN_TOKEN"),
 		FlightLogStorageDir:  env("FLIGHT_LOG_STORAGE_DIR", "./data/flights"),
+		COSBucketURL:         cosBucketURL,
+		COSSecretID:          cosSecretID,
+		COSSecretKey:         cosSecretKey,
 	}
 	if cfg.DatabaseDSN == "" {
 		return Config{}, fmt.Errorf("DATABASE_DSN is required")
@@ -92,4 +114,18 @@ func splitCSV(value string) []string {
 		}
 	}
 	return result
+}
+
+func validateCOSBucketURL(raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("COS_BUCKET_URL is invalid")
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if parsed.Scheme != "https" || parsed.User != nil || parsed.Port() != "" ||
+		(host == "" || net.ParseIP(host) != nil || !strings.Contains(host, ".cos.") || !strings.HasSuffix(host, ".myqcloud.com")) ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("COS_BUCKET_URL must be an HTTPS Tencent COS bucket host")
+	}
+	return nil
 }

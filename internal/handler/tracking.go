@@ -23,12 +23,28 @@ type TrackingService interface {
 	ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error)
 }
 
-type TrackingHandler struct {
-	tracking TrackingService
+type TrackingPointObserver interface {
+	ObserveTrackingPoints(userID uuid.UUID, points []model.LiveTrackPoint)
 }
 
-func NewTrackingHandler(tracking TrackingService) *TrackingHandler {
-	return &TrackingHandler{tracking: tracking}
+type TrackingSessionObserver interface {
+	PublicSharingChanged(ownerID, sessionID uuid.UUID, enabled bool)
+	LiveSessionEnded(ownerID, sessionID uuid.UUID)
+}
+
+type TrackingHandler struct {
+	tracking        TrackingService
+	observer        TrackingPointObserver
+	sessionObserver TrackingSessionObserver
+}
+
+func NewTrackingHandler(tracking TrackingService, observers ...TrackingPointObserver) *TrackingHandler {
+	handler := &TrackingHandler{tracking: tracking}
+	if len(observers) > 0 {
+		handler.observer = observers[0]
+		handler.sessionObserver, _ = observers[0].(TrackingSessionObserver)
+	}
+	return handler
 }
 
 type startTrackingRequest struct {
@@ -134,6 +150,9 @@ func (h *TrackingHandler) SetPublicSharing(c *gin.Context) {
 		respondTrackingError(c, err)
 		return
 	}
+	if h.sessionObserver != nil {
+		h.sessionObserver.PublicSharingChanged(userID, sessionID, *request.PubliclyShare)
+	}
 	c.Status(http.StatusNoContent)
 }
 
@@ -197,6 +216,9 @@ func (h *TrackingHandler) AddPoints(c *gin.Context) {
 		respondTrackingError(c, err)
 		return
 	}
+	if h.observer != nil {
+		h.observer.ObserveTrackingPoints(userID, points)
+	}
 	c.JSON(http.StatusOK, gin.H{"accepted": accepted})
 }
 
@@ -223,6 +245,9 @@ func (h *TrackingHandler) Stop(c *gin.Context) {
 	if err := h.tracking.StopSession(c.Request.Context(), userID, sessionID, request.EndTime); err != nil {
 		respondTrackingError(c, err)
 		return
+	}
+	if h.sessionObserver != nil {
+		h.sessionObserver.LiveSessionEnded(userID, sessionID)
 	}
 	c.Status(http.StatusNoContent)
 }

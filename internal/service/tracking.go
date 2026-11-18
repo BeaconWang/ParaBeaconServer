@@ -121,7 +121,9 @@ func (s *TrackingService) ListPublicLocations(ctx context.Context, userID uuid.U
 	locationIndexes := make(map[uuid.UUID]int, len(locations))
 	for index := range locations {
 		locations[index].Path = []model.PublicPilotTrackPoint{}
-		sessionIDs = append(sessionIDs, locations[index].SessionID)
+		roomID := locations[index].SessionID
+		locations[index].LiveRoomID = &roomID
+		sessionIDs = append(sessionIDs, roomID)
 		locationIndexes[locations[index].SessionID] = index
 	}
 	trackPoints, err := s.tracking.ListPublicTrackPoints(

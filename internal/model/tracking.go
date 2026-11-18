@@ -19,6 +19,7 @@ type LiveTrackSession struct {
 
 type PublicPilotLocation struct {
 	SessionID     uuid.UUID               `gorm:"column:session_id" json:"-"`
+	LiveRoomID    *uuid.UUID              `gorm:"-" json:"live_room_id,omitempty"`
 	PilotName     string                  `gorm:"column:pilot_name" json:"pilot_name"`
 	Latitude      float64                 `gorm:"column:latitude" json:"lat"`
 	Longitude     float64                 `gorm:"column:longitude" json:"lon"`

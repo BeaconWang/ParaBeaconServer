@@ -14,6 +14,8 @@ import (
 	"github.com/parabeacon/server/internal/cache"
 	"github.com/parabeacon/server/internal/config"
 	"github.com/parabeacon/server/internal/database"
+	"github.com/parabeacon/server/internal/flight"
+	"github.com/parabeacon/server/internal/realtime"
 	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/internal/router"
 	"github.com/parabeacon/server/internal/service"
@@ -59,7 +61,22 @@ func run() error {
 	users := repository.NewUserRepository(db)
 	refreshTokens := repository.NewRefreshTokenRepository(db)
 	authService := service.NewAuthService(users, tokens, refreshTokens)
-	engine, err := router.New(cfg, db, authService, tokens)
+	var igcStore service.IGCObjectStore
+	if cfg.COSBucketURL != "" {
+		igcStore, err = service.NewCOSIGCObjectStore(cfg.COSBucketURL, cfg.COSSecretID, cfg.COSSecretKey)
+		if err != nil {
+			return fmt.Errorf("configure COS IGC archive: %w", err)
+		}
+	} else {
+		logger.Println("COS IGC archive is not configured; IGC content will be stored inline in flight logs")
+	}
+	flightSettlement := service.NewAutomaticFlightSettlement(repository.NewFlightLogRepository(db), igcStore)
+	flightLifecycle := flight.NewLifecycleEngine(ctx, flightSettlement, logger)
+	defer flightLifecycle.Close()
+	liveHub := realtime.NewHub(redisClient, flightLifecycle, logger)
+	liveHub.Start()
+	defer liveHub.Close()
+	engine, err := router.New(cfg, db, authService, tokens, liveHub)
 	if err != nil {
 		return fmt.Errorf("configure HTTP routes: %w", err)
 	}
