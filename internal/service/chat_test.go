@@ -18,6 +18,7 @@ type memoryChatRepository struct {
 	users          map[uuid.UUID]repository.ChatUser
 	messages       []model.ChatMessage
 	locationStatus map[int]bool
+	pins           map[uuid.UUID]map[uuid.UUID]time.Time
 }
 
 func (r *memoryChatRepository) FindChatUserByID(_ context.Context, id uuid.UUID) (*repository.ChatUser, error) {
@@ -69,6 +70,85 @@ func (r *memoryChatRepository) SearchChatAccounts(_ context.Context, requesterID
 		accounts = accounts[:limit]
 	}
 	return accounts, nil
+}
+
+func (r *memoryChatRepository) ListChatConversations(_ context.Context, requesterID uuid.UUID, query string, offset, limit int) ([]repository.ChatConversation, error) {
+	owner := r.users[requesterID]
+	query = strings.ToLower(query)
+	conversations := make([]repository.ChatConversation, 0)
+	for id, user := range r.users {
+		if id == requesterID || owner.ChannelNumber == 0 || user.ChannelNumber != owner.ChannelNumber {
+			continue
+		}
+		if query != "" && !strings.Contains(strings.ToLower(user.Username), query) && !strings.Contains(strings.ToLower(user.DisplayName), query) {
+			continue
+		}
+		conversation := repository.ChatConversation{
+			PeerID: id, PilotNumber: user.PilotNumber, Username: user.Username,
+			DisplayName: user.DisplayName, AvatarID: user.AvatarID,
+		}
+		for _, message := range r.messages {
+			if message.Scope != ChatScopeDirect || message.RecipientID == nil ||
+				!((message.SenderID == requesterID && *message.RecipientID == id) ||
+					(message.SenderID == id && *message.RecipientID == requesterID)) {
+				continue
+			}
+			if conversation.LastChatAt == nil || message.CreatedAt.After(*conversation.LastChatAt) {
+				lastChatAt := message.CreatedAt
+				conversation.LastChatAt = &lastChatAt
+			}
+		}
+		if pinnedAt, ok := r.pins[requesterID][id]; ok {
+			conversation.Pinned = true
+			pinnedAtCopy := pinnedAt
+			conversation.PinnedAt = &pinnedAtCopy
+		}
+		conversations = append(conversations, conversation)
+	}
+	sort.Slice(conversations, func(i, j int) bool {
+		left, right := conversations[i], conversations[j]
+		if left.Pinned != right.Pinned {
+			return left.Pinned
+		}
+		if left.Pinned && right.Pinned && !left.PinnedAt.Equal(*right.PinnedAt) {
+			return left.PinnedAt.Before(*right.PinnedAt)
+		}
+		if left.LastChatAt != nil || right.LastChatAt != nil {
+			if left.LastChatAt == nil {
+				return false
+			}
+			if right.LastChatAt == nil {
+				return true
+			}
+			if !left.LastChatAt.Equal(*right.LastChatAt) {
+				return left.LastChatAt.After(*right.LastChatAt)
+			}
+		}
+		return left.PilotNumber < right.PilotNumber
+	})
+	if offset >= len(conversations) {
+		return []repository.ChatConversation{}, nil
+	}
+	conversations = conversations[offset:]
+	if len(conversations) > limit {
+		conversations = conversations[:limit]
+	}
+	return conversations, nil
+}
+
+func (r *memoryChatRepository) SetChatConversationPinned(_ context.Context, ownerID, peerID uuid.UUID, pinned bool, pinnedAt time.Time) error {
+	if r.pins == nil {
+		r.pins = make(map[uuid.UUID]map[uuid.UUID]time.Time)
+	}
+	if r.pins[ownerID] == nil {
+		r.pins[ownerID] = make(map[uuid.UUID]time.Time)
+	}
+	if pinned {
+		r.pins[ownerID][peerID] = pinnedAt
+	} else {
+		delete(r.pins[ownerID], peerID)
+	}
+	return nil
 }
 
 func (r *memoryChatRepository) HasFreshPublicLocation(_ context.Context, pilotNumber int, _, _ time.Time) (bool, error) {
@@ -165,6 +245,77 @@ func TestSearchAccountsFindsUsernameAndDisplayNameAndPages(t *testing.T) {
 		if account.PilotNumber == 100001 {
 			t.Fatal("account search included the requester")
 		}
+	}
+}
+
+func TestListConversationsSortsPinnedThenRecentAndPersistsPins(t *testing.T) {
+	requesterID, recentID, oldID, pinnedID, otherChannelID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	lastRecent := now.Add(-time.Minute)
+	lastOld := now.Add(-time.Hour)
+	oldRecipient := oldID
+	repository := &memoryChatRepository{
+		users: map[uuid.UUID]repository.ChatUser{
+			requesterID:    {ID: requesterID, PilotNumber: 100001, ChannelNumber: 123456, Username: "requester"},
+			recentID:       {ID: recentID, PilotNumber: 100002, ChannelNumber: 123456, Username: "recent_pilot", DisplayName: "Recent Pilot", AvatarID: 2},
+			oldID:          {ID: oldID, PilotNumber: 100003, ChannelNumber: 123456, Username: "old_pilot"},
+			pinnedID:       {ID: pinnedID, PilotNumber: 100004, ChannelNumber: 123456, Username: "pinned_pilot"},
+			otherChannelID: {ID: otherChannelID, PilotNumber: 100005, ChannelNumber: 654321, Username: "other_frequency"},
+		},
+		messages: []model.ChatMessage{
+			{ID: uuid.New(), Scope: ChatScopeDirect, SenderID: requesterID, RecipientID: &oldRecipient, CreatedAt: lastOld},
+			{ID: uuid.New(), Scope: ChatScopeDirect, SenderID: recentID, RecipientID: &requesterID, CreatedAt: lastRecent},
+		},
+	}
+	chat := NewChatService(repository)
+
+	if err := chat.SetConversationPinned(context.Background(), requesterID, 100004, true); err != nil {
+		t.Fatalf("pin first conversation: %v", err)
+	}
+	if err := chat.SetConversationPinned(context.Background(), requesterID, 100003, true); err != nil {
+		t.Fatalf("pin second conversation: %v", err)
+	}
+	page, err := chat.ListConversations(context.Background(), requesterID, "", "", 2)
+	if err != nil {
+		t.Fatalf("list conversations: %v", err)
+	}
+	if len(page.Conversations) != 2 || page.NextCursor != "2" {
+		t.Fatalf("first conversation page = %#v", page)
+	}
+	pinnedPilotNumbers := map[int]bool{
+		page.Conversations[0].PilotNumber: page.Conversations[0].Pinned,
+		page.Conversations[1].PilotNumber: page.Conversations[1].Pinned,
+	}
+	if !pinnedPilotNumbers[100003] || !pinnedPilotNumbers[100004] {
+		t.Fatalf("pinned conversations are not ordered before unpinned chats: %#v", page.Conversations)
+	}
+	secondPage, err := chat.ListConversations(context.Background(), requesterID, "", page.NextCursor, 2)
+	if err != nil || len(secondPage.Conversations) != 1 || secondPage.Conversations[0].PilotNumber != 100002 || secondPage.Conversations[0].LastChatAt == nil || !secondPage.Conversations[0].LastChatAt.Equal(lastRecent) {
+		t.Fatalf("recent conversation page = %#v, err=%v", secondPage, err)
+	}
+	if secondPage.Conversations[0].AvatarID != 2 {
+		t.Fatalf("conversation avatar id = %d, want 2", secondPage.Conversations[0].AvatarID)
+	}
+	searched, err := chat.ListConversations(context.Background(), requesterID, "recent", "", 10)
+	if err != nil || len(searched.Conversations) != 1 || searched.Conversations[0].PilotNumber != 100002 {
+		t.Fatalf("filtered conversation list = %#v, err=%v", searched, err)
+	}
+
+	if err := chat.SetConversationPinned(context.Background(), requesterID, 100004, false); err != nil {
+		t.Fatalf("unpin first conversation: %v", err)
+	}
+	if err := chat.SetConversationPinned(context.Background(), requesterID, 100003, false); err != nil {
+		t.Fatalf("unpin second conversation: %v", err)
+	}
+	unpinned, err := chat.ListConversations(context.Background(), requesterID, "", "", 10)
+	if err != nil || len(unpinned.Conversations) != 3 || unpinned.Conversations[0].PilotNumber != 100002 || unpinned.Conversations[1].PilotNumber != 100003 || unpinned.Conversations[2].PilotNumber != 100004 || unpinned.Conversations[2].Pinned {
+		t.Fatalf("unpinned recent ordering = %#v, err=%v", unpinned, err)
+	}
+	if err := chat.SetConversationPinned(context.Background(), requesterID, 100005, true); !errors.Is(err, ErrInvalidChatRequest) {
+		t.Fatalf("pin other-channel pilot error = %v, want invalid request", err)
+	}
+	if _, err := chat.ListConversations(context.Background(), requesterID, "x", "", 10); !errors.Is(err, ErrInvalidChatRequest) {
+		t.Fatalf("short conversation search error = %v, want invalid request", err)
 	}
 }
 

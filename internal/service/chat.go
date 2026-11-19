@@ -62,6 +62,16 @@ type ChatAccountPage struct {
 	NextCursor string                   `json:"next_cursor,omitempty"`
 }
 
+type ChatConversation struct {
+	repository.ChatConversation
+	Online bool `json:"online"`
+}
+
+type ChatConversationPage struct {
+	Conversations []ChatConversation `json:"conversations"`
+	NextCursor    string             `json:"next_cursor,omitempty"`
+}
+
 type SendChatRequest struct {
 	Scope         string `json:"scope"`
 	ChannelNumber int    `json:"channel_number,omitempty"`
@@ -215,6 +225,59 @@ func (s *ChatService) SearchAccounts(ctx context.Context, requesterID uuid.UUID,
 		page.NextCursor = strconv.Itoa(accounts[len(accounts)-1].PilotNumber)
 	}
 	return page, nil
+}
+
+func (s *ChatService) ListConversations(ctx context.Context, requesterID uuid.UUID, rawQuery, rawCursor string, limit int) (ChatConversationPage, error) {
+	query := strings.TrimSpace(rawQuery)
+	if requesterID == uuid.Nil ||
+		!utf8.ValidString(query) ||
+		utf8.RuneCountInString(query) > 64 ||
+		strings.ContainsAny(query, "\x00\r\n") ||
+		(query != "" && utf8.RuneCountInString(query) < 2) ||
+		limit < 1 || limit > ChatAccountMaxPageSize {
+		return ChatConversationPage{}, ErrInvalidChatRequest
+	}
+	offset := 0
+	if rawCursor != "" {
+		parsed, err := strconv.Atoi(rawCursor)
+		if err != nil || parsed < 0 || parsed > 1000000 {
+			return ChatConversationPage{}, ErrInvalidChatRequest
+		}
+		offset = parsed
+	}
+	if _, err := s.repository.FindChatUserByID(ctx, requesterID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ChatConversationPage{}, ErrChatUserNotFound
+		}
+		return ChatConversationPage{}, err
+	}
+	conversations, err := s.repository.ListChatConversations(ctx, requesterID, query, offset, limit+1)
+	if err != nil {
+		return ChatConversationPage{}, err
+	}
+	hasMore := len(conversations) > limit
+	if hasMore {
+		conversations = conversations[:limit]
+	}
+	page := ChatConversationPage{Conversations: make([]ChatConversation, len(conversations))}
+	for index, conversation := range conversations {
+		page.Conversations[index] = ChatConversation{ChatConversation: conversation}
+	}
+	if hasMore {
+		page.NextCursor = strconv.Itoa(offset + limit)
+	}
+	return page, nil
+}
+
+func (s *ChatService) SetConversationPinned(ctx context.Context, requesterID uuid.UUID, pilotNumber int, pinned bool) error {
+	peerID, err := s.SubscribePeer(ctx, requesterID, pilotNumber)
+	if err != nil {
+		return err
+	}
+	if err := s.repository.SetChatConversationPinned(ctx, requesterID, peerID, pinned, time.Now().UTC()); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *ChatService) ValidateChannel(ctx context.Context, userID uuid.UUID, channelNumber int) error {

@@ -29,6 +29,7 @@ const (
 	chatWriteWait    = 5 * time.Second
 	chatPongWait     = 60 * time.Second
 	chatPingPeriod   = 25 * time.Second
+	chatPresenceTTL  = 90 * time.Second
 	chatMaxMessage   = 4096
 )
 
@@ -37,6 +38,25 @@ local value = redis.call('GET', KEYS[1])
 if value then redis.call('DEL', KEYS[1]) end
 return value
 `)
+
+var touchChatPresenceScript = redis.NewScript(`
+redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2])
+redis.call('PEXPIRE', KEYS[1], ARGV[3])
+return 1
+`)
+
+var removeChatPresenceScript = redis.NewScript(`
+redis.call('ZREM', KEYS[1], ARGV[1])
+if redis.call('ZCARD', KEYS[1]) == 0 then redis.call('DEL', KEYS[1]) end
+return 1
+`)
+
+const countChatPresenceScript = `
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
+local count = redis.call('ZCARD', KEYS[1])
+if count == 0 then redis.call('DEL', KEYS[1]) end
+return count
+`
 
 type chatAudience struct {
 	Scope         string    `json:"scope"`
@@ -88,6 +108,7 @@ type chatClient struct {
 	hub             *ChatHub
 	conn            *websocket.Conn
 	userID          uuid.UUID
+	presenceID      string
 	channel         int
 	peerID          uuid.UUID
 	send            chan []byte
@@ -110,6 +131,94 @@ func NewChatHub(redisClient *redis.Client, chat *service.ChatService, logger *lo
 		ctx:     ctx,
 		cancel:  cancel,
 		tickets: make(map[string]localChatTicket),
+	}
+}
+
+func (h *ChatHub) OnlineUsers(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	statuses := make(map[uuid.UUID]bool, len(userIDs))
+	uniqueIDs := make([]uuid.UUID, 0, len(userIDs))
+	seen := make(map[uuid.UUID]struct{}, len(userIDs))
+	for _, userID := range userIDs {
+		if userID == uuid.Nil {
+			continue
+		}
+		statuses[userID] = false
+		if _, ok := seen[userID]; !ok {
+			seen[userID] = struct{}{}
+			uniqueIDs = append(uniqueIDs, userID)
+		}
+	}
+	if len(uniqueIDs) == 0 {
+		return statuses, nil
+	}
+	if h.redis == nil {
+		h.mu.Lock()
+		for client := range h.clients {
+			if _, ok := statuses[client.userID]; ok {
+				statuses[client.userID] = true
+			}
+		}
+		h.mu.Unlock()
+		return statuses, nil
+	}
+
+	pipeline := h.redis.Pipeline()
+	commands := make(map[uuid.UUID]*redis.Cmd, len(uniqueIDs))
+	now := time.Now().UnixMilli()
+	for _, userID := range uniqueIDs {
+		key := chatPresenceKey(userID)
+		commands[userID] = pipeline.Eval(ctx, countChatPresenceScript, []string{key}, now)
+	}
+	_, err := pipeline.Exec(ctx)
+	if err != nil && !errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("query chat presence: %w", err)
+	}
+	for userID, command := range commands {
+		count, commandErr := command.Int64()
+		if commandErr != nil && !errors.Is(commandErr, redis.Nil) {
+			return nil, fmt.Errorf("read chat presence: %w", commandErr)
+		}
+		statuses[userID] = count > 0
+	}
+	return statuses, nil
+}
+
+func chatPresenceKey(userID uuid.UUID) string {
+	return "parabeacon:chat:presence:" + userID.String()
+}
+
+func (h *ChatHub) refreshPresence(client *chatClient) {
+	if h.redis == nil || client.presenceID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, 2*time.Second)
+	defer cancel()
+	expiresAt := time.Now().Add(chatPresenceTTL).UnixMilli()
+	if err := touchChatPresenceScript.Run(
+		ctx,
+		h.redis,
+		[]string{chatPresenceKey(client.userID)},
+		expiresAt,
+		client.presenceID,
+		chatPresenceTTL.Milliseconds()*2,
+	).Err(); err != nil && h.ctx.Err() == nil {
+		h.logger.Printf("refresh chat presence user=%s: %v", client.userID, err)
+	}
+}
+
+func (h *ChatHub) removePresence(client *chatClient) {
+	if h.redis == nil || client.presenceID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := removeChatPresenceScript.Run(
+		ctx,
+		h.redis,
+		[]string{chatPresenceKey(client.userID)},
+		client.presenceID,
+	).Err(); err != nil {
+		h.logger.Printf("remove chat presence user=%s: %v", client.userID, err)
 	}
 }
 
@@ -228,11 +337,12 @@ func (h *ChatHub) ServeHTTP(allowedOrigins []string) gin.HandlerFunc {
 			return
 		}
 		client := &chatClient{
-			hub:    h,
-			conn:   conn,
-			userID: userID,
-			send:   make(chan []byte, 64),
-			done:   make(chan struct{}),
+			hub:        h,
+			conn:       conn,
+			userID:     userID,
+			presenceID: uuid.NewString(),
+			send:       make(chan []byte, 64),
+			done:       make(chan struct{}),
 		}
 		h.mu.Lock()
 		if h.ctx.Err() != nil {
@@ -242,6 +352,7 @@ func (h *ChatHub) ServeHTTP(allowedOrigins []string) gin.HandlerFunc {
 		}
 		h.clients[client] = struct{}{}
 		h.mu.Unlock()
+		h.refreshPresence(client)
 		go client.writePump()
 		client.readPump()
 		h.removeClient(client)
@@ -253,6 +364,7 @@ func (h *ChatHub) removeClient(client *chatClient) {
 	delete(h.clients, client)
 	client.close()
 	h.mu.Unlock()
+	h.removePresence(client)
 	_ = client.conn.Close()
 }
 
@@ -381,6 +493,7 @@ func (c *chatClient) readPump() {
 	c.conn.SetReadLimit(chatMaxMessage)
 	_ = c.conn.SetReadDeadline(time.Now().Add(chatPongWait))
 	c.conn.SetPongHandler(func(string) error {
+		c.hub.refreshPresence(c)
 		return c.conn.SetReadDeadline(time.Now().Add(chatPongWait))
 	})
 	for {
@@ -412,6 +525,16 @@ func (c *chatClient) subscribe(incoming chatClientMessage) {
 	}
 	c.lastSubscribeAt = now
 	switch incoming.Scope {
+	case "presence":
+		if incoming.ChannelNumber != 0 || incoming.PilotNumber != 0 {
+			c.sendError("invalid_subscription")
+			return
+		}
+		c.hub.mu.Lock()
+		c.channel = 0
+		c.peerID = uuid.Nil
+		c.hub.mu.Unlock()
+		c.enqueueJSON(chatServerMessage{Type: "subscribed", Scope: "presence"})
 	case "public":
 		if incoming.ChannelNumber != 0 || incoming.PilotNumber != 0 {
 			c.sendError("invalid_subscription")

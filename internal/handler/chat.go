@@ -58,6 +58,74 @@ func (h *ChatHandler) PilotLocationStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"actively_sharing_location": sharing})
 }
 
+func (h *ChatHandler) ListConversations(c *gin.Context) {
+	userID, ok := chatRequesterID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	limit := service.ChatAccountPageSize
+	if rawLimit := c.Query("limit"); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed < 1 || parsed > service.ChatAccountMaxPageSize {
+			respondError(c, http.StatusBadRequest, "invalid conversation list limit")
+			return
+		}
+		limit = parsed
+	}
+	page, err := h.chat.ListConversations(
+		c.Request.Context(),
+		userID,
+		c.Query("q"),
+		c.Query("cursor"),
+		limit,
+	)
+	if err != nil {
+		respondChatError(c, err)
+		return
+	}
+	peerIDs := make([]uuid.UUID, 0, len(page.Conversations))
+	for _, conversation := range page.Conversations {
+		peerIDs = append(peerIDs, conversation.PeerID)
+	}
+	online, err := h.hub.OnlineUsers(c.Request.Context(), peerIDs)
+	if err != nil {
+		respondInternalError(c)
+		return
+	}
+	for index := range page.Conversations {
+		page.Conversations[index].Online = online[page.Conversations[index].PeerID]
+	}
+	c.JSON(http.StatusOK, page)
+}
+
+type pinChatConversationRequest struct {
+	Pinned *bool `json:"pinned"`
+}
+
+func (h *ChatHandler) SetConversationPinned(c *gin.Context) {
+	userID, ok := chatRequesterID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	pilotNumber, err := strconv.Atoi(c.Param("pilot_number"))
+	if err != nil || pilotNumber < 100000 || pilotNumber > 999999 {
+		respondError(c, http.StatusBadRequest, "invalid pilot number")
+		return
+	}
+	var request pinChatConversationRequest
+	if err := c.ShouldBindJSON(&request); err != nil || request.Pinned == nil {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := h.chat.SetConversationPinned(c.Request.Context(), userID, pilotNumber, *request.Pinned); err != nil {
+		respondChatError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"pinned": *request.Pinned})
+}
+
 func (h *ChatHandler) SearchAccounts(c *gin.Context) {
 	userID, ok := chatRequesterID(c)
 	if !ok {

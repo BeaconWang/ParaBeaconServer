@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,19 +13,23 @@ import (
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/middleware"
 	"github.com/parabeacon/server/internal/model"
+	"github.com/parabeacon/server/internal/realtime"
 	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/internal/service"
 	"gorm.io/gorm"
 )
 
 type chatStatusTestRepository struct {
-	pilotID     uuid.UUID
-	requesterID uuid.UUID
-	sharing     bool
-	accounts    []repository.ChatAccount
-	searchQuery string
-	searchAfter int
-	searchLimit int
+	pilotID       uuid.UUID
+	requesterID   uuid.UUID
+	sharing       bool
+	accounts      []repository.ChatAccount
+	searchQuery   string
+	searchAfter   int
+	searchLimit   int
+	conversations []repository.ChatConversation
+	pinnedPeer    uuid.UUID
+	pinned        bool
 }
 
 func (r *chatStatusTestRepository) FindChatUserByID(_ context.Context, id uuid.UUID) (*repository.ChatUser, error) {
@@ -58,6 +63,23 @@ func (r *chatStatusTestRepository) SearchChatAccounts(_ context.Context, _ uuid.
 		accounts = accounts[:limit]
 	}
 	return accounts, nil
+}
+
+func (r *chatStatusTestRepository) ListChatConversations(_ context.Context, _ uuid.UUID, _ string, offset, limit int) ([]repository.ChatConversation, error) {
+	if offset >= len(r.conversations) {
+		return []repository.ChatConversation{}, nil
+	}
+	conversations := r.conversations[offset:]
+	if len(conversations) > limit {
+		conversations = conversations[:limit]
+	}
+	return conversations, nil
+}
+
+func (r *chatStatusTestRepository) SetChatConversationPinned(_ context.Context, _, peerID uuid.UUID, pinned bool, _ time.Time) error {
+	r.pinnedPeer = peerID
+	r.pinned = pinned
+	return nil
 }
 
 func (r *chatStatusTestRepository) HasFreshPublicLocation(_ context.Context, number int, _, _ time.Time) (bool, error) {
@@ -129,6 +151,85 @@ func TestSearchChatAccountsRequiresAuthenticationAndReturnsMinimalResults(t *tes
 	anonymousEngine.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestListConversationsIncludesOnlinePinAndRecentActivity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requesterID, peerID := uuid.New(), uuid.New()
+	lastChatAt := time.Now().UTC().Add(-time.Minute)
+	repository := &chatStatusTestRepository{
+		requesterID: requesterID,
+		conversations: []repository.ChatConversation{{
+			PeerID: peerID, PilotNumber: 234567, Username: "friend", DisplayName: "Sky Friend",
+			AvatarID: 3, LastChatAt: &lastChatAt, Pinned: true, PinnedAt: &lastChatAt,
+		}},
+	}
+	chat := service.NewChatService(repository)
+	hub := realtime.NewChatHub(nil, chat, nil)
+	defer hub.Close()
+	handler := NewChatHandler(chat, hub)
+	engine := gin.New()
+	engine.GET("/chat/conversations", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, requesterID)
+		handler.ListConversations(c)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/chat/conversations?q=Sky&cursor=0&limit=10", nil)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("list status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	var body struct {
+		Conversations []struct {
+			PilotNumber int        `json:"pilot_number"`
+			AvatarID    int        `json:"avatar_id"`
+			Online      bool       `json:"online"`
+			Pinned      bool       `json:"pinned"`
+			LastChatAt  *time.Time `json:"last_chat_at"`
+		} `json:"conversations"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode conversation list: %v", err)
+	}
+	if len(body.Conversations) != 1 {
+		t.Fatalf("conversation count = %d, want 1", len(body.Conversations))
+	}
+	conversation := body.Conversations[0]
+	if conversation.PilotNumber != 234567 || conversation.AvatarID != 3 || !conversation.Pinned || conversation.Online || conversation.LastChatAt == nil {
+		t.Fatalf("conversation = %#v", conversation)
+	}
+}
+
+func TestSetConversationPinnedRequiresAuthenticatedSameChannelPeer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requesterID, peerID := uuid.New(), uuid.New()
+	repository := &chatStatusTestRepository{requesterID: requesterID, pilotID: peerID}
+	chat := service.NewChatService(repository)
+	hub := realtime.NewChatHub(nil, chat, nil)
+	defer hub.Close()
+	handler := NewChatHandler(chat, hub)
+	engine := gin.New()
+	engine.PUT("/chat/conversations/:pilot_number/pin", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, requesterID)
+		handler.SetConversationPinned(c)
+	})
+	request := httptest.NewRequest(http.MethodPut, "/chat/conversations/234567/pin", strings.NewReader(`{"pinned":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || repository.pinnedPeer != peerID || !repository.pinned {
+		t.Fatalf("pin response = %d %s, peer=%s pinned=%v", response.Code, response.Body.String(), repository.pinnedPeer, repository.pinned)
+	}
+
+	anonymous := gin.New()
+	anonymous.PUT("/chat/conversations/:pilot_number/pin", handler.SetConversationPinned)
+	request = httptest.NewRequest(http.MethodPut, "/chat/conversations/234567/pin", strings.NewReader(`{"pinned":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	anonymous.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous pin status = %d, want %d", response.Code, http.StatusUnauthorized)
 	}
 }
 

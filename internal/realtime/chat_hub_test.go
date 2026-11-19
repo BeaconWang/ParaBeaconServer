@@ -37,6 +37,32 @@ func TestChatTicketsAreShortLivedAndSingleUse(t *testing.T) {
 	}
 }
 
+func TestOnlineUsersReportsAuthenticatedSocketConnections(t *testing.T) {
+	hub := NewChatHub(nil, nil, log.New(testLogWriter{t}, "", 0))
+	defer hub.Close()
+	friendID, otherID := uuid.New(), uuid.New()
+	client := &chatClient{userID: friendID}
+	hub.mu.Lock()
+	hub.clients[client] = struct{}{}
+	hub.mu.Unlock()
+
+	statuses, err := hub.OnlineUsers(context.Background(), []uuid.UUID{friendID, otherID, friendID})
+	if err != nil {
+		t.Fatalf("OnlineUsers() error = %v", err)
+	}
+	if !statuses[friendID] || statuses[otherID] {
+		t.Fatalf("online statuses = %#v, want friend online and other offline", statuses)
+	}
+
+	hub.mu.Lock()
+	delete(hub.clients, client)
+	hub.mu.Unlock()
+	statuses, err = hub.OnlineUsers(context.Background(), []uuid.UUID{friendID})
+	if err != nil || statuses[friendID] {
+		t.Fatalf("disconnected pilot online=%v err=%v, want offline", statuses[friendID], err)
+	}
+}
+
 func TestChatAudienceRoutesOnlyToMatchingClients(t *testing.T) {
 	sender := uuid.New()
 	recipient := uuid.New()

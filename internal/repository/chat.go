@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const ChatPageSize = 50
@@ -28,10 +29,23 @@ type ChatAccount struct {
 	AvatarID    int    `json:"avatar_id"`
 }
 
+type ChatConversation struct {
+	PeerID      uuid.UUID  `json:"-"`
+	PilotNumber int        `json:"pilot_number"`
+	Username    string     `json:"username"`
+	DisplayName string     `json:"display_name,omitempty"`
+	AvatarID    int        `json:"avatar_id"`
+	LastChatAt  *time.Time `json:"last_chat_at,omitempty"`
+	Pinned      bool       `json:"pinned"`
+	PinnedAt    *time.Time `json:"-"`
+}
+
 type ChatRepository interface {
 	FindChatUserByID(context.Context, uuid.UUID) (*ChatUser, error)
 	FindChatUserByPilotNumber(context.Context, int) (*ChatUser, error)
 	SearchChatAccounts(context.Context, uuid.UUID, string, int, int) ([]ChatAccount, error)
+	ListChatConversations(context.Context, uuid.UUID, string, int, int) ([]ChatConversation, error)
+	SetChatConversationPinned(context.Context, uuid.UUID, uuid.UUID, bool, time.Time) error
 	CreateChatMessage(context.Context, *model.ChatMessage) error
 	ListPublicChat(context.Context, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
 	ListChannelChat(context.Context, int, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
@@ -89,6 +103,65 @@ func (r *GormChatRepository) SearchChatAccounts(ctx context.Context, requesterID
 		return nil, fmt.Errorf("search chat accounts: %w", err)
 	}
 	return accounts, nil
+}
+
+func (r *GormChatRepository) ListChatConversations(ctx context.Context, requesterID uuid.UUID, query string, offset, limit int) ([]ChatConversation, error) {
+	conversations := make([]ChatConversation, 0, limit)
+	databaseQuery := r.db.WithContext(ctx).
+		Table("users AS peer").
+		Select(`
+			peer.id AS peer_id,
+			peer.pilot_number,
+			peer.username,
+			peer.display_name,
+			peer.avatar_id,
+			latest.last_chat_at,
+			pins.pinned_at IS NOT NULL AS pinned,
+			pins.pinned_at
+		`).
+		Joins("JOIN users AS owner ON owner.id = ?", requesterID).
+		Joins("LEFT JOIN chat_conversation_pins AS pins ON pins.owner_id = owner.id AND pins.peer_id = peer.id").
+		Joins(`LEFT JOIN LATERAL (
+			SELECT MAX(message.created_at) AS last_chat_at
+			FROM chat_messages AS message
+			WHERE message.scope = ?
+				AND ((message.sender_id = owner.id AND message.recipient_id = peer.id)
+					OR (message.sender_id = peer.id AND message.recipient_id = owner.id))
+		) AS latest ON TRUE`, "direct").
+		Where("peer.id <> owner.id AND owner.channel_number > 0 AND peer.channel_number = owner.channel_number")
+	if query != "" {
+		databaseQuery = databaseQuery.Where(
+			"POSITION(LOWER(?) IN LOWER(peer.username)) > 0 OR POSITION(LOWER(?) IN LOWER(peer.display_name)) > 0",
+			query,
+			query,
+		)
+	}
+	if err := databaseQuery.
+		Order("(pins.pinned_at IS NOT NULL) DESC, pins.pinned_at ASC, latest.last_chat_at DESC NULLS LAST, peer.pilot_number ASC").
+		Offset(offset).
+		Limit(limit).
+		Scan(&conversations).Error; err != nil {
+		return nil, fmt.Errorf("list chat conversations: %w", err)
+	}
+	return conversations, nil
+}
+
+func (r *GormChatRepository) SetChatConversationPinned(ctx context.Context, ownerID, peerID uuid.UUID, pinned bool, pinnedAt time.Time) error {
+	query := r.db.WithContext(ctx).Where("owner_id = ? AND peer_id = ?", ownerID, peerID)
+	if !pinned {
+		if err := query.Delete(&model.ChatConversationPin{}).Error; err != nil {
+			return fmt.Errorf("unpin chat conversation: %w", err)
+		}
+		return nil
+	}
+	pin := model.ChatConversationPin{OwnerID: ownerID, PeerID: peerID, PinnedAt: pinnedAt, CreatedAt: pinnedAt}
+	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "owner_id"}, {Name: "peer_id"}},
+		DoUpdates: clause.Assignments(map[string]any{"pinned_at": pinnedAt}),
+	}).Create(&pin).Error; err != nil {
+		return fmt.Errorf("pin chat conversation: %w", err)
+	}
+	return nil
 }
 
 func (r *GormChatRepository) HasFreshPublicLocation(ctx context.Context, pilotNumber int, observedSince, observedUntil time.Time) (bool, error) {
