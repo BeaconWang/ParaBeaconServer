@@ -31,6 +31,7 @@ type ChatAccount struct {
 
 type ChatConversation struct {
 	PeerID      uuid.UUID  `json:"-"`
+	Online      bool       `json:"-"`
 	PilotNumber int        `json:"pilot_number"`
 	Username    string     `json:"username"`
 	DisplayName string     `json:"display_name,omitempty"`
@@ -44,7 +45,7 @@ type ChatRepository interface {
 	FindChatUserByID(context.Context, uuid.UUID) (*ChatUser, error)
 	FindChatUserByPilotNumber(context.Context, int) (*ChatUser, error)
 	SearchChatAccounts(context.Context, uuid.UUID, string, int, int) ([]ChatAccount, error)
-	ListChatConversations(context.Context, uuid.UUID, string, int, int) ([]ChatConversation, error)
+	ListChatConversations(context.Context, uuid.UUID, string, []uuid.UUID, int, int) ([]ChatConversation, error)
 	SetChatConversationPinned(context.Context, uuid.UUID, uuid.UUID, bool, time.Time) error
 	CreateChatMessage(context.Context, *model.ChatMessage) error
 	ListPublicChat(context.Context, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
@@ -90,8 +91,7 @@ func (r *GormChatRepository) SearchChatAccounts(ctx context.Context, requesterID
 	databaseQuery := r.db.WithContext(ctx).
 		Table("users").
 		Select("pilot_number, username, display_name, avatar_id").
-		Where("id <> ? AND pilot_number > ?", requesterID, afterPilotNumber).
-		Where("channel_number > 0 AND channel_number = (SELECT channel_number FROM users WHERE id = ?)", requesterID)
+		Where("id <> ? AND pilot_number > ?", requesterID, afterPilotNumber)
 	if query != "" {
 		databaseQuery = databaseQuery.Where(
 			"POSITION(LOWER(?) IN LOWER(username)) > 0 OR POSITION(LOWER(?) IN LOWER(display_name)) > 0",
@@ -105,20 +105,27 @@ func (r *GormChatRepository) SearchChatAccounts(ctx context.Context, requesterID
 	return accounts, nil
 }
 
-func (r *GormChatRepository) ListChatConversations(ctx context.Context, requesterID uuid.UUID, query string, offset, limit int) ([]ChatConversation, error) {
+func (r *GormChatRepository) ListChatConversations(ctx context.Context, requesterID uuid.UUID, query string, onlineIDs []uuid.UUID, offset, limit int) ([]ChatConversation, error) {
 	conversations := make([]ChatConversation, 0, limit)
+	selectOnline := "FALSE AS online"
+	var onlineArgs []any
+	if len(onlineIDs) > 0 {
+		selectOnline = "CASE WHEN peer.id IN ? THEN TRUE ELSE FALSE END AS online"
+		onlineArgs = append(onlineArgs, onlineIDs)
+	}
+	selection := `
+		peer.id AS peer_id,
+		peer.pilot_number,
+		peer.username,
+		peer.display_name,
+		peer.avatar_id,
+		latest.last_chat_at,
+		pins.pinned_at IS NOT NULL AS pinned,
+		pins.pinned_at,
+		` + selectOnline
 	databaseQuery := r.db.WithContext(ctx).
 		Table("users AS peer").
-		Select(`
-			peer.id AS peer_id,
-			peer.pilot_number,
-			peer.username,
-			peer.display_name,
-			peer.avatar_id,
-			latest.last_chat_at,
-			pins.pinned_at IS NOT NULL AS pinned,
-			pins.pinned_at
-		`).
+		Select(selection, onlineArgs...).
 		Joins("JOIN users AS owner ON owner.id = ?", requesterID).
 		Joins("LEFT JOIN chat_conversation_pins AS pins ON pins.owner_id = owner.id AND pins.peer_id = peer.id").
 		Joins(`LEFT JOIN LATERAL (
@@ -128,7 +135,7 @@ func (r *GormChatRepository) ListChatConversations(ctx context.Context, requeste
 				AND ((message.sender_id = owner.id AND message.recipient_id = peer.id)
 					OR (message.sender_id = peer.id AND message.recipient_id = owner.id))
 		) AS latest ON TRUE`, "direct").
-		Where("peer.id <> owner.id AND owner.channel_number > 0 AND peer.channel_number = owner.channel_number")
+		Where("peer.id <> owner.id")
 	if query != "" {
 		databaseQuery = databaseQuery.Where(
 			"POSITION(LOWER(?) IN LOWER(peer.username)) > 0 OR POSITION(LOWER(?) IN LOWER(peer.display_name)) > 0",
@@ -137,7 +144,7 @@ func (r *GormChatRepository) ListChatConversations(ctx context.Context, requeste
 		)
 	}
 	if err := databaseQuery.
-		Order("(pins.pinned_at IS NOT NULL) DESC, pins.pinned_at ASC, latest.last_chat_at DESC NULLS LAST, peer.pilot_number ASC").
+		Order("online DESC, (pins.pinned_at IS NOT NULL) DESC, pins.pinned_at ASC, LOWER(COALESCE(NULLIF(BTRIM(peer.display_name), ''), peer.username)) ASC, peer.pilot_number ASC").
 		Offset(offset).
 		Limit(limit).
 		Scan(&conversations).Error; err != nil {

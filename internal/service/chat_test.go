@@ -43,12 +43,8 @@ func (r *memoryChatRepository) FindChatUserByPilotNumber(_ context.Context, numb
 func (r *memoryChatRepository) SearchChatAccounts(_ context.Context, requesterID uuid.UUID, query string, afterPilotNumber, limit int) ([]repository.ChatAccount, error) {
 	query = strings.ToLower(query)
 	accounts := make([]repository.ChatAccount, 0)
-	requester := r.users[requesterID]
 	for id, user := range r.users {
-		if requester.ChannelNumber == 0 ||
-			id == requesterID ||
-			user.ChannelNumber != requester.ChannelNumber ||
-			user.PilotNumber <= afterPilotNumber {
+		if id == requesterID || user.PilotNumber <= afterPilotNumber {
 			continue
 		}
 		if query != "" &&
@@ -72,19 +68,23 @@ func (r *memoryChatRepository) SearchChatAccounts(_ context.Context, requesterID
 	return accounts, nil
 }
 
-func (r *memoryChatRepository) ListChatConversations(_ context.Context, requesterID uuid.UUID, query string, offset, limit int) ([]repository.ChatConversation, error) {
-	owner := r.users[requesterID]
+func (r *memoryChatRepository) ListChatConversations(_ context.Context, requesterID uuid.UUID, query string, onlineIDs []uuid.UUID, offset, limit int) ([]repository.ChatConversation, error) {
 	query = strings.ToLower(query)
+	onlineSet := make(map[uuid.UUID]struct{}, len(onlineIDs))
+	for _, id := range onlineIDs {
+		onlineSet[id] = struct{}{}
+	}
 	conversations := make([]repository.ChatConversation, 0)
 	for id, user := range r.users {
-		if id == requesterID || owner.ChannelNumber == 0 || user.ChannelNumber != owner.ChannelNumber {
+		if id == requesterID {
 			continue
 		}
 		if query != "" && !strings.Contains(strings.ToLower(user.Username), query) && !strings.Contains(strings.ToLower(user.DisplayName), query) {
 			continue
 		}
+		_, online := onlineSet[id]
 		conversation := repository.ChatConversation{
-			PeerID: id, PilotNumber: user.PilotNumber, Username: user.Username,
+			PeerID: id, Online: online, PilotNumber: user.PilotNumber, Username: user.Username,
 			DisplayName: user.DisplayName, AvatarID: user.AvatarID,
 		}
 		for _, message := range r.messages {
@@ -107,22 +107,25 @@ func (r *memoryChatRepository) ListChatConversations(_ context.Context, requeste
 	}
 	sort.Slice(conversations, func(i, j int) bool {
 		left, right := conversations[i], conversations[j]
+		if left.Online != right.Online {
+			return left.Online
+		}
 		if left.Pinned != right.Pinned {
 			return left.Pinned
 		}
 		if left.Pinned && right.Pinned && !left.PinnedAt.Equal(*right.PinnedAt) {
 			return left.PinnedAt.Before(*right.PinnedAt)
 		}
-		if left.LastChatAt != nil || right.LastChatAt != nil {
-			if left.LastChatAt == nil {
-				return false
-			}
-			if right.LastChatAt == nil {
-				return true
-			}
-			if !left.LastChatAt.Equal(*right.LastChatAt) {
-				return left.LastChatAt.After(*right.LastChatAt)
-			}
+		leftName := strings.ToLower(strings.TrimSpace(left.DisplayName))
+		if leftName == "" {
+			leftName = strings.ToLower(left.Username)
+		}
+		rightName := strings.ToLower(strings.TrimSpace(right.DisplayName))
+		if rightName == "" {
+			rightName = strings.ToLower(right.Username)
+		}
+		if leftName != rightName {
+			return leftName < rightName
 		}
 		return left.PilotNumber < right.PilotNumber
 	})
@@ -220,7 +223,7 @@ func TestSearchAccountsFindsUsernameAndDisplayNameAndPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search display name: %v", err)
 	}
-	if len(byDisplayName.Accounts) != 2 || byDisplayName.Accounts[0].DisplayName != "Alice Summit" {
+	if len(byDisplayName.Accounts) != 3 || byDisplayName.Accounts[0].DisplayName != "Alice Summit" {
 		t.Fatalf("display-name matches = %#v", byDisplayName.Accounts)
 	}
 	if byDisplayName.Accounts[0].AvatarID != 4 {
@@ -238,7 +241,7 @@ func TestSearchAccountsFindsUsernameAndDisplayNameAndPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list second account page: %v", err)
 	}
-	if len(secondPage.Accounts) != 1 || secondPage.Accounts[0].Username != "carol" || secondPage.NextCursor != "" {
+	if len(secondPage.Accounts) != 2 || secondPage.Accounts[0].Username != "carol" || secondPage.Accounts[1].Username != "alice_other" || secondPage.NextCursor != "" {
 		t.Fatalf("second page = %#v", secondPage)
 	}
 	for _, account := range append(firstPage.Accounts, secondPage.Accounts...) {
@@ -248,7 +251,7 @@ func TestSearchAccountsFindsUsernameAndDisplayNameAndPages(t *testing.T) {
 	}
 }
 
-func TestListConversationsSortsPinnedThenRecentAndPersistsPins(t *testing.T) {
+func TestListConversationsShowsAllPilotsOnlineFirstThenByName(t *testing.T) {
 	requesterID, recentID, oldID, pinnedID, otherChannelID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lastRecent := now.Add(-time.Minute)
@@ -257,10 +260,10 @@ func TestListConversationsSortsPinnedThenRecentAndPersistsPins(t *testing.T) {
 	repository := &memoryChatRepository{
 		users: map[uuid.UUID]repository.ChatUser{
 			requesterID:    {ID: requesterID, PilotNumber: 100001, ChannelNumber: 123456, Username: "requester"},
-			recentID:       {ID: recentID, PilotNumber: 100002, ChannelNumber: 123456, Username: "recent_pilot", DisplayName: "Recent Pilot", AvatarID: 2},
-			oldID:          {ID: oldID, PilotNumber: 100003, ChannelNumber: 123456, Username: "old_pilot"},
-			pinnedID:       {ID: pinnedID, PilotNumber: 100004, ChannelNumber: 123456, Username: "pinned_pilot"},
-			otherChannelID: {ID: otherChannelID, PilotNumber: 100005, ChannelNumber: 654321, Username: "other_frequency"},
+			recentID:       {ID: recentID, PilotNumber: 100002, ChannelNumber: 123456, Username: "recent_pilot", DisplayName: "Alice Recent", AvatarID: 2},
+			oldID:          {ID: oldID, PilotNumber: 100003, ChannelNumber: 123456, Username: "old_pilot", DisplayName: "Bob Offline"},
+			pinnedID:       {ID: pinnedID, PilotNumber: 100004, ChannelNumber: 123456, Username: "pinned_pilot", DisplayName: "Zoe Pinned"},
+			otherChannelID: {ID: otherChannelID, PilotNumber: 100005, ChannelNumber: 654321, Username: "other_frequency", DisplayName: "Aaron Other"},
 		},
 		messages: []model.ChatMessage{
 			{ID: uuid.New(), Scope: ChatScopeDirect, SenderID: requesterID, RecipientID: &oldRecipient, CreatedAt: lastOld},
@@ -268,53 +271,56 @@ func TestListConversationsSortsPinnedThenRecentAndPersistsPins(t *testing.T) {
 		},
 	}
 	chat := NewChatService(repository)
+	onlineIDs := []uuid.UUID{recentID, pinnedID, otherChannelID}
 
 	if err := chat.SetConversationPinned(context.Background(), requesterID, 100004, true); err != nil {
-		t.Fatalf("pin first conversation: %v", err)
+		t.Fatalf("pin online conversation: %v", err)
 	}
 	if err := chat.SetConversationPinned(context.Background(), requesterID, 100003, true); err != nil {
-		t.Fatalf("pin second conversation: %v", err)
+		t.Fatalf("pin offline conversation: %v", err)
 	}
-	page, err := chat.ListConversations(context.Background(), requesterID, "", "", 2)
+	page, err := chat.ListConversations(context.Background(), requesterID, onlineIDs, "", "", 2)
 	if err != nil {
 		t.Fatalf("list conversations: %v", err)
 	}
 	if len(page.Conversations) != 2 || page.NextCursor != "2" {
 		t.Fatalf("first conversation page = %#v", page)
 	}
-	pinnedPilotNumbers := map[int]bool{
-		page.Conversations[0].PilotNumber: page.Conversations[0].Pinned,
-		page.Conversations[1].PilotNumber: page.Conversations[1].Pinned,
+	if page.Conversations[0].PilotNumber != 100004 || !page.Conversations[0].Online || !page.Conversations[0].Pinned {
+		t.Fatalf("first conversation = %#v", page.Conversations[0])
 	}
-	if !pinnedPilotNumbers[100003] || !pinnedPilotNumbers[100004] {
-		t.Fatalf("pinned conversations are not ordered before unpinned chats: %#v", page.Conversations)
+	if page.Conversations[1].PilotNumber != 100005 || !page.Conversations[1].Online {
+		t.Fatalf("online pilot from another channel missing: %#v", page.Conversations[1])
 	}
-	secondPage, err := chat.ListConversations(context.Background(), requesterID, "", page.NextCursor, 2)
-	if err != nil || len(secondPage.Conversations) != 1 || secondPage.Conversations[0].PilotNumber != 100002 || secondPage.Conversations[0].LastChatAt == nil || !secondPage.Conversations[0].LastChatAt.Equal(lastRecent) {
-		t.Fatalf("recent conversation page = %#v, err=%v", secondPage, err)
+	secondPage, err := chat.ListConversations(context.Background(), requesterID, onlineIDs, "", page.NextCursor, 2)
+	if err != nil || len(secondPage.Conversations) != 2 {
+		t.Fatalf("second conversation page = %#v, err=%v", secondPage, err)
+	}
+	if secondPage.Conversations[0].PilotNumber != 100002 || !secondPage.Conversations[0].Online || secondPage.Conversations[0].LastChatAt == nil || !secondPage.Conversations[0].LastChatAt.Equal(lastRecent) {
+		t.Fatalf("online alphabetical conversation = %#v", secondPage.Conversations[0])
 	}
 	if secondPage.Conversations[0].AvatarID != 2 {
 		t.Fatalf("conversation avatar id = %d, want 2", secondPage.Conversations[0].AvatarID)
 	}
-	searched, err := chat.ListConversations(context.Background(), requesterID, "recent", "", 10)
+	if secondPage.Conversations[1].PilotNumber != 100003 || secondPage.Conversations[1].Online || !secondPage.Conversations[1].Pinned {
+		t.Fatalf("offline pilot should follow all online pilots: %#v", secondPage.Conversations[1])
+	}
+	searched, err := chat.ListConversations(context.Background(), requesterID, onlineIDs, "recent", "", 10)
 	if err != nil || len(searched.Conversations) != 1 || searched.Conversations[0].PilotNumber != 100002 {
 		t.Fatalf("filtered conversation list = %#v, err=%v", searched, err)
 	}
 
 	if err := chat.SetConversationPinned(context.Background(), requesterID, 100004, false); err != nil {
-		t.Fatalf("unpin first conversation: %v", err)
+		t.Fatalf("unpin online conversation: %v", err)
 	}
 	if err := chat.SetConversationPinned(context.Background(), requesterID, 100003, false); err != nil {
-		t.Fatalf("unpin second conversation: %v", err)
+		t.Fatalf("unpin offline conversation: %v", err)
 	}
-	unpinned, err := chat.ListConversations(context.Background(), requesterID, "", "", 10)
-	if err != nil || len(unpinned.Conversations) != 3 || unpinned.Conversations[0].PilotNumber != 100002 || unpinned.Conversations[1].PilotNumber != 100003 || unpinned.Conversations[2].PilotNumber != 100004 || unpinned.Conversations[2].Pinned {
-		t.Fatalf("unpinned recent ordering = %#v, err=%v", unpinned, err)
+	unpinned, err := chat.ListConversations(context.Background(), requesterID, onlineIDs, "", "", 10)
+	if err != nil || len(unpinned.Conversations) != 4 || unpinned.Conversations[0].PilotNumber != 100005 || unpinned.Conversations[1].PilotNumber != 100002 || unpinned.Conversations[2].PilotNumber != 100004 || unpinned.Conversations[3].PilotNumber != 100003 {
+		t.Fatalf("online-first alphabetical ordering = %#v, err=%v", unpinned, err)
 	}
-	if err := chat.SetConversationPinned(context.Background(), requesterID, 100005, true); !errors.Is(err, ErrInvalidChatRequest) {
-		t.Fatalf("pin other-channel pilot error = %v, want invalid request", err)
-	}
-	if _, err := chat.ListConversations(context.Background(), requesterID, "x", "", 10); !errors.Is(err, ErrInvalidChatRequest) {
+	if _, err := chat.ListConversations(context.Background(), requesterID, onlineIDs, "x", "", 10); !errors.Is(err, ErrInvalidChatRequest) {
 		t.Fatalf("short conversation search error = %v, want invalid request", err)
 	}
 }
@@ -341,7 +347,7 @@ func TestSearchAccountsRejectsInvalidQueriesAndPaging(t *testing.T) {
 	}
 }
 
-func TestChannelAccessRequiresSameNonzeroAssignedFrequency(t *testing.T) {
+func TestChannelChatStaysOnFrequencyButDirectMessagesReachAllPilots(t *testing.T) {
 	requesterID, sameChannelID, otherChannelID := uuid.New(), uuid.New(), uuid.New()
 	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
 		requesterID:    {ID: requesterID, PilotNumber: 123456, ChannelNumber: 765432, Username: "requester"},
@@ -362,8 +368,9 @@ func TestChannelAccessRequiresSameNonzeroAssignedFrequency(t *testing.T) {
 	if err != nil || peerID != sameChannelID {
 		t.Fatalf("same-frequency private peer = %s, err=%v", peerID, err)
 	}
-	if _, err := chat.SubscribePeer(context.Background(), requesterID, 345678); !errors.Is(err, ErrInvalidChatRequest) {
-		t.Fatalf("cross-frequency private peer error = %v, want invalid request", err)
+	peerID, err = chat.SubscribePeer(context.Background(), requesterID, 345678)
+	if err != nil || peerID != otherChannelID {
+		t.Fatalf("cross-frequency private peer = %s, err=%v", peerID, err)
 	}
 }
 
@@ -476,8 +483,13 @@ func TestChatValidatesChannelsRecipientsAndText(t *testing.T) {
 			t.Errorf("Send(%#v) error = %v, want invalid request", request, err)
 		}
 	}
-	if _, err := chat.Send(ctx, aliceID, SendChatRequest{Scope: ChatScopeDirect, PilotNumber: 234567, Text: "different frequency"}); !errors.Is(err, ErrInvalidChatRequest) {
-		t.Fatalf("cross-channel direct message error = %v, want invalid request", err)
+	message, err := chat.Send(ctx, aliceID, SendChatRequest{Scope: ChatScopeDirect, PilotNumber: 234567, Text: "different frequency"})
+	if err != nil || message.RecipientID != bobID {
+		t.Fatalf("cross-channel direct message = %#v, err=%v", message, err)
+	}
+	history, err := chat.History(ctx, aliceID, ChatScopeDirect, 0, 234567, "")
+	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != message.ID {
+		t.Fatalf("cross-channel direct history = %#v, err=%v", history, err)
 	}
 	if _, err := chat.Send(ctx, aliceID, SendChatRequest{Scope: ChatScopeDirect, PilotNumber: 999998, Text: "unknown pilot"}); !errors.Is(err, ErrChatUserNotFound) {
 		t.Fatalf("missing recipient error = %v, want not found", err)

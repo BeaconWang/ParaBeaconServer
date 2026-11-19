@@ -53,6 +53,10 @@ func TestOnlineUsersReportsAuthenticatedSocketConnections(t *testing.T) {
 	if !statuses[friendID] || statuses[otherID] {
 		t.Fatalf("online statuses = %#v, want friend online and other offline", statuses)
 	}
+	onlineIDs, err := hub.OnlineUserIDs(context.Background())
+	if err != nil || len(onlineIDs) != 1 || onlineIDs[0] != friendID {
+		t.Fatalf("OnlineUserIDs() = %v, err=%v; want friend", onlineIDs, err)
+	}
 
 	hub.mu.Lock()
 	delete(hub.clients, client)

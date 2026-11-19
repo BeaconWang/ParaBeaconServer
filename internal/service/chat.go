@@ -154,9 +154,6 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 		if err != nil {
 			return ChatMessage{}, err
 		}
-		if sender.ChannelNumber == 0 || recipient.ChannelNumber != sender.ChannelNumber {
-			return ChatMessage{}, ErrInvalidChatRequest
-		}
 		message.RecipientID = &recipient.ID
 		message.RecipientPilotNumber = &recipient.PilotNumber
 	default:
@@ -227,7 +224,7 @@ func (s *ChatService) SearchAccounts(ctx context.Context, requesterID uuid.UUID,
 	return page, nil
 }
 
-func (s *ChatService) ListConversations(ctx context.Context, requesterID uuid.UUID, rawQuery, rawCursor string, limit int) (ChatConversationPage, error) {
+func (s *ChatService) ListConversations(ctx context.Context, requesterID uuid.UUID, onlineIDs []uuid.UUID, rawQuery, rawCursor string, limit int) (ChatConversationPage, error) {
 	query := strings.TrimSpace(rawQuery)
 	if requesterID == uuid.Nil ||
 		!utf8.ValidString(query) ||
@@ -251,7 +248,7 @@ func (s *ChatService) ListConversations(ctx context.Context, requesterID uuid.UU
 		}
 		return ChatConversationPage{}, err
 	}
-	conversations, err := s.repository.ListChatConversations(ctx, requesterID, query, offset, limit+1)
+	conversations, err := s.repository.ListChatConversations(ctx, requesterID, query, onlineIDs, offset, limit+1)
 	if err != nil {
 		return ChatConversationPage{}, err
 	}
@@ -261,7 +258,10 @@ func (s *ChatService) ListConversations(ctx context.Context, requesterID uuid.UU
 	}
 	page := ChatConversationPage{Conversations: make([]ChatConversation, len(conversations))}
 	for index, conversation := range conversations {
-		page.Conversations[index] = ChatConversation{ChatConversation: conversation}
+		page.Conversations[index] = ChatConversation{
+			ChatConversation: conversation,
+			Online:           conversation.Online,
+		}
 	}
 	if hasMore {
 		page.NextCursor = strconv.Itoa(offset + limit)
@@ -301,8 +301,7 @@ func (s *ChatService) PublicLocationStatus(ctx context.Context, requesterID uuid
 	if requesterID == uuid.Nil || pilotNumber < 100000 || pilotNumber > 999999 {
 		return false, ErrInvalidChatRequest
 	}
-	requester, err := s.repository.FindChatUserByID(ctx, requesterID)
-	if err != nil {
+	if _, err := s.repository.FindChatUserByID(ctx, requesterID); err != nil {
 		return false, err
 	}
 	pilot, err := s.repository.FindChatUserByPilotNumber(ctx, pilotNumber)
@@ -312,7 +311,7 @@ func (s *ChatService) PublicLocationStatus(ctx context.Context, requesterID uuid
 	if err != nil {
 		return false, err
 	}
-	if requester.ChannelNumber == 0 || pilot.ChannelNumber != requester.ChannelNumber || pilot.ID == requesterID {
+	if pilot.ID == requesterID {
 		return false, nil
 	}
 	now := time.Now().UTC()
@@ -328,11 +327,9 @@ func (s *ChatService) SubscribePeer(ctx context.Context, userID uuid.UUID, numbe
 	if userID == uuid.Nil || number < 100000 || number > 999999 {
 		return uuid.Nil, ErrInvalidChatRequest
 	}
-	requester, err := s.repository.FindChatUserByID(ctx, userID)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if _, err := s.repository.FindChatUserByID(ctx, userID); errors.Is(err, gorm.ErrRecordNotFound) {
 		return uuid.Nil, ErrChatUserNotFound
-	}
-	if err != nil {
+	} else if err != nil {
 		return uuid.Nil, err
 	}
 	peer, err := s.repository.FindChatUserByPilotNumber(ctx, number)
@@ -342,7 +339,7 @@ func (s *ChatService) SubscribePeer(ctx context.Context, userID uuid.UUID, numbe
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if peer.ID == userID || requester.ChannelNumber == 0 || peer.ChannelNumber != requester.ChannelNumber {
+	if peer.ID == userID {
 		return uuid.Nil, ErrInvalidChatRequest
 	}
 	return peer.ID, nil

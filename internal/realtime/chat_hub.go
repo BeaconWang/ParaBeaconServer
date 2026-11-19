@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,14 +24,15 @@ import (
 )
 
 const (
-	chatEventChannel = "parabeacon:chat:events"
-	chatTicketPrefix = "parabeacon:chat:ticket:"
-	chatTicketTTL    = 30 * time.Second
-	chatWriteWait    = 5 * time.Second
-	chatPongWait     = 60 * time.Second
-	chatPingPeriod   = 25 * time.Second
-	chatPresenceTTL  = 90 * time.Second
-	chatMaxMessage   = 4096
+	chatEventChannel     = "parabeacon:chat:events"
+	chatTicketPrefix     = "parabeacon:chat:ticket:"
+	chatTicketTTL        = 30 * time.Second
+	chatWriteWait        = 5 * time.Second
+	chatPongWait         = 60 * time.Second
+	chatPingPeriod       = 25 * time.Second
+	chatPresenceTTL      = 90 * time.Second
+	chatPresenceUsersKey = "parabeacon:chat:presence:online-users"
+	chatMaxMessage       = 4096
 )
 
 var consumeChatTicketScript = redis.NewScript(`
@@ -42,12 +44,17 @@ return value
 var touchChatPresenceScript = redis.NewScript(`
 redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2])
 redis.call('PEXPIRE', KEYS[1], ARGV[3])
+redis.call('ZADD', KEYS[2], ARGV[1], ARGV[4])
+redis.call('PEXPIRE', KEYS[2], ARGV[5])
 return 1
 `)
 
 var removeChatPresenceScript = redis.NewScript(`
 redis.call('ZREM', KEYS[1], ARGV[1])
-if redis.call('ZCARD', KEYS[1]) == 0 then redis.call('DEL', KEYS[1]) end
+if redis.call('ZCARD', KEYS[1]) == 0 then
+  redis.call('DEL', KEYS[1])
+  redis.call('ZREM', KEYS[2], ARGV[2])
+end
 return 1
 `)
 
@@ -183,6 +190,43 @@ func (h *ChatHub) OnlineUsers(ctx context.Context, userIDs []uuid.UUID) (map[uui
 	return statuses, nil
 }
 
+func (h *ChatHub) OnlineUserIDs(ctx context.Context) ([]uuid.UUID, error) {
+	if h.redis == nil {
+		unique := make(map[uuid.UUID]struct{})
+		h.mu.Lock()
+		for client := range h.clients {
+			unique[client.userID] = struct{}{}
+		}
+		h.mu.Unlock()
+		userIDs := make([]uuid.UUID, 0, len(unique))
+		for userID := range unique {
+			userIDs = append(userIDs, userID)
+		}
+		return userIDs, nil
+	}
+
+	now := time.Now().UnixMilli()
+	if err := h.redis.ZRemRangeByScore(ctx, chatPresenceUsersKey, "-inf", strconv.FormatInt(now, 10)).Err(); err != nil {
+		return nil, fmt.Errorf("prune chat presence index: %w", err)
+	}
+	values, err := h.redis.ZRangeByScore(ctx, chatPresenceUsersKey, &redis.ZRangeBy{
+		Min: strconv.FormatInt(now+1, 10),
+		Max: "+inf",
+	}).Result()
+	if err != nil {
+		return nil, fmt.Errorf("list online chat users: %w", err)
+	}
+	userIDs := make([]uuid.UUID, 0, len(values))
+	for _, value := range values {
+		userID, err := uuid.Parse(value)
+		if err != nil || userID == uuid.Nil {
+			continue
+		}
+		userIDs = append(userIDs, userID)
+	}
+	return userIDs, nil
+}
+
 func chatPresenceKey(userID uuid.UUID) string {
 	return "parabeacon:chat:presence:" + userID.String()
 }
@@ -197,10 +241,12 @@ func (h *ChatHub) refreshPresence(client *chatClient) {
 	if err := touchChatPresenceScript.Run(
 		ctx,
 		h.redis,
-		[]string{chatPresenceKey(client.userID)},
+		[]string{chatPresenceKey(client.userID), chatPresenceUsersKey},
 		expiresAt,
 		client.presenceID,
 		chatPresenceTTL.Milliseconds()*2,
+		client.userID.String(),
+		chatPresenceTTL.Milliseconds()*4,
 	).Err(); err != nil && h.ctx.Err() == nil {
 		h.logger.Printf("refresh chat presence user=%s: %v", client.userID, err)
 	}
@@ -215,8 +261,9 @@ func (h *ChatHub) removePresence(client *chatClient) {
 	if err := removeChatPresenceScript.Run(
 		ctx,
 		h.redis,
-		[]string{chatPresenceKey(client.userID)},
+		[]string{chatPresenceKey(client.userID), chatPresenceUsersKey},
 		client.presenceID,
+		client.userID.String(),
 	).Err(); err != nil {
 		h.logger.Printf("remove chat presence user=%s: %v", client.userID, err)
 	}

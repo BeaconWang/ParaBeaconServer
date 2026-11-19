@@ -73,9 +73,15 @@ func (h *ChatHandler) ListConversations(c *gin.Context) {
 		}
 		limit = parsed
 	}
+	onlineUserIDs, err := h.hub.OnlineUserIDs(c.Request.Context())
+	if err != nil {
+		respondInternalError(c)
+		return
+	}
 	page, err := h.chat.ListConversations(
 		c.Request.Context(),
 		userID,
+		onlineUserIDs,
 		c.Query("q"),
 		c.Query("cursor"),
 		limit,
@@ -83,18 +89,6 @@ func (h *ChatHandler) ListConversations(c *gin.Context) {
 	if err != nil {
 		respondChatError(c, err)
 		return
-	}
-	peerIDs := make([]uuid.UUID, 0, len(page.Conversations))
-	for _, conversation := range page.Conversations {
-		peerIDs = append(peerIDs, conversation.PeerID)
-	}
-	online, err := h.hub.OnlineUsers(c.Request.Context(), peerIDs)
-	if err != nil {
-		respondInternalError(c)
-		return
-	}
-	for index := range page.Conversations {
-		page.Conversations[index].Online = online[page.Conversations[index].PeerID]
 	}
 	c.JSON(http.StatusOK, page)
 }

@@ -65,11 +65,18 @@ func (r *chatStatusTestRepository) SearchChatAccounts(_ context.Context, _ uuid.
 	return accounts, nil
 }
 
-func (r *chatStatusTestRepository) ListChatConversations(_ context.Context, _ uuid.UUID, _ string, offset, limit int) ([]repository.ChatConversation, error) {
+func (r *chatStatusTestRepository) ListChatConversations(_ context.Context, _ uuid.UUID, _ string, onlineIDs []uuid.UUID, offset, limit int) ([]repository.ChatConversation, error) {
 	if offset >= len(r.conversations) {
 		return []repository.ChatConversation{}, nil
 	}
-	conversations := r.conversations[offset:]
+	onlineSet := make(map[uuid.UUID]struct{}, len(onlineIDs))
+	for _, id := range onlineIDs {
+		onlineSet[id] = struct{}{}
+	}
+	conversations := append([]repository.ChatConversation(nil), r.conversations[offset:]...)
+	for index := range conversations {
+		_, conversations[index].Online = onlineSet[conversations[index].PeerID]
+	}
 	if len(conversations) > limit {
 		conversations = conversations[:limit]
 	}
