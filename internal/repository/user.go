@@ -21,11 +21,28 @@ type UserRepository interface {
 	UpdateAvatarID(ctx context.Context, id uuid.UUID, avatarID int) error
 }
 
+type ProfileImageRepository interface {
+	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
+	UpdateProfileImageKey(ctx context.Context, id uuid.UUID, imageKey string) (string, error)
+}
+
 type PasswordChangeRepository interface {
 	ChangePassword(ctx context.Context, id uuid.UUID, expectedHash, newHash string, changedAt time.Time) error
 }
 
 var ErrPasswordChanged = errors.New("password changed concurrently")
+
+func ProfileImageURL(imageKey string) string {
+	if !validProfileImageKey(imageKey) {
+		return ""
+	}
+	return "/api/v1/profile-images/" + imageKey
+}
+
+func validProfileImageKey(key string) bool {
+	id, err := uuid.Parse(key)
+	return err == nil && id != uuid.Nil && id.String() == key
+}
 
 type GormUserRepository struct {
 	db *gorm.DB
@@ -84,6 +101,31 @@ func (r *GormUserRepository) ChangePassword(ctx context.Context, id uuid.UUID, e
 			Where("user_id = ? AND revoked_at IS NULL", id).
 			Update("revoked_at", changedAt).Error
 	})
+}
+
+func (r *GormUserRepository) UpdateProfileImageKey(ctx context.Context, id uuid.UUID, imageKey string) (string, error) {
+	var previousKey string
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id, profile_image_key").
+			First(&user, "id = ?", id).Error; err != nil {
+			return err
+		}
+		previousKey = user.ProfileImageKey
+		if err := tx.Model(&model.ChatMessage{}).
+			Where("sender_id = ?", id).
+			Update("sender_profile_image_url", ProfileImageURL(imageKey)).Error; err != nil {
+			return fmt.Errorf("update chat profile image references: %w", err)
+		}
+		return tx.Model(&model.User{}).
+			Where("id = ?", id).
+			Update("profile_image_key", imageKey).Error
+	})
+	if err != nil {
+		return "", fmt.Errorf("update user profile image: %w", err)
+	}
+	return previousKey, nil
 }
 
 func (r *GormUserRepository) UpdateChannelNumber(ctx context.Context, id uuid.UUID, channelNumber int) error {

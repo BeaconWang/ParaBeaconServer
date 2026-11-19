@@ -70,6 +70,12 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 
 	authHandler := handler.NewAuthHandler(authService)
 	userHandler := handler.NewUserHandler(authService)
+	profileImageStorage, err := service.NewProfileImageStorage(cfg.ProfileImageStorageDir)
+	if err != nil {
+		return nil, err
+	}
+	profileImageService := service.NewProfileImageService(repository.NewUserRepository(db), profileImageStorage)
+	profileImageHandler := handler.NewProfileImageHandler(profileImageService)
 	trackingRepo := repository.NewTrackingRepository(db)
 	trackingService := service.NewTrackingService(trackingRepo)
 	trackingHandler := handler.NewTrackingHandler(trackingService, liveHub)
@@ -110,11 +116,14 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		v1.DELETE("/admin/app/releases/:version_code", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Delete)
 		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Publish)
 		v1.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), trackingHandler.ListPublicLocations)
+		v1.GET("/profile-images/:image_key", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), profileImageHandler.Get)
 
 		protected := v1.Group("")
 		protected.Use(middleware.RequireAuth(tokens, repository.NewRefreshTokenRepository(db)))
 		protected.GET("/user/profile", userHandler.Profile)
 		protected.PATCH("/user/profile", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), userHandler.UpdateProfile)
+		protected.POST("/user/profile-image", middleware.NewFixedWindowLimiter(10, time.Hour, 10000).Middleware(), profileImageHandler.Upload)
+		protected.DELETE("/user/profile-image", middleware.NewFixedWindowLimiter(10, time.Hour, 10000).Middleware(), profileImageHandler.Remove)
 		protected.POST("/user/change-password", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), userHandler.ChangePassword)
 		protected.GET("/tracking", trackingHandler.ListActive)
 		protected.GET("/tracking/live", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), realtime.NewWebSocketHandler(

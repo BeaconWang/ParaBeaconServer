@@ -35,16 +35,17 @@ var (
 )
 
 type ChatMessage struct {
-	ID                   uuid.UUID `json:"id"`
-	Scope                string    `json:"scope"`
-	ChannelNumber        *int      `json:"channel_number,omitempty"`
-	SenderPilotNumber    int       `json:"sender_pilot_number"`
-	SenderName           string    `json:"sender_name"`
-	SenderAvatarID       int       `json:"sender_avatar_id"`
-	RecipientPilotNumber *int      `json:"recipient_pilot_number,omitempty"`
-	RecipientID          uuid.UUID `json:"-"`
-	Text                 string    `json:"text"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                    uuid.UUID `json:"id"`
+	Scope                 string    `json:"scope"`
+	ChannelNumber         *int      `json:"channel_number,omitempty"`
+	SenderPilotNumber     int       `json:"sender_pilot_number"`
+	SenderName            string    `json:"sender_name"`
+	SenderAvatarID        int       `json:"sender_avatar_id"`
+	SenderProfileImageURL string    `json:"sender_profile_image_url,omitempty"`
+	RecipientPilotNumber  *int      `json:"recipient_pilot_number,omitempty"`
+	RecipientID           uuid.UUID `json:"-"`
+	Text                  string    `json:"text"`
+	CreatedAt             time.Time `json:"created_at"`
 }
 
 type ChatCursor struct {
@@ -120,14 +121,15 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 		senderName = sender.Username
 	}
 	message := &model.ChatMessage{
-		ID:                uuid.New(),
-		Scope:             request.Scope,
-		SenderID:          sender.ID,
-		SenderPilotNumber: sender.PilotNumber,
-		SenderName:        senderName,
-		SenderAvatarID:    sender.AvatarID,
-		Text:              text,
-		CreatedAt:         time.Now().UTC(),
+		ID:                    uuid.New(),
+		Scope:                 request.Scope,
+		SenderID:              sender.ID,
+		SenderPilotNumber:     sender.PilotNumber,
+		SenderName:            senderName,
+		SenderAvatarID:        sender.AvatarID,
+		SenderProfileImageURL: sender.ProfileImageURL,
+		Text:                  text,
+		CreatedAt:             time.Now().UTC(),
 	}
 	switch request.Scope {
 	case ChatScopePublic:
@@ -415,16 +417,17 @@ func dereferenceUUID(value *uuid.UUID) uuid.UUID {
 
 func chatMessageFromModel(message *model.ChatMessage) ChatMessage {
 	return ChatMessage{
-		ID:                   message.ID,
-		Scope:                message.Scope,
-		ChannelNumber:        message.ChannelNumber,
-		SenderPilotNumber:    message.SenderPilotNumber,
-		SenderName:           message.SenderName,
-		SenderAvatarID:       message.SenderAvatarID,
-		RecipientPilotNumber: message.RecipientPilotNumber,
-		RecipientID:          dereferenceUUID(message.RecipientID),
-		Text:                 message.Text,
-		CreatedAt:            message.CreatedAt.UTC(),
+		ID:                    message.ID,
+		Scope:                 message.Scope,
+		ChannelNumber:         message.ChannelNumber,
+		SenderPilotNumber:     message.SenderPilotNumber,
+		SenderName:            message.SenderName,
+		SenderAvatarID:        message.SenderAvatarID,
+		SenderProfileImageURL: message.SenderProfileImageURL,
+		RecipientPilotNumber:  message.RecipientPilotNumber,
+		RecipientID:           dereferenceUUID(message.RecipientID),
+		Text:                  message.Text,
+		CreatedAt:             message.CreatedAt.UTC(),
 	}
 }
 

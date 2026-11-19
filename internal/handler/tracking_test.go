@@ -63,16 +63,17 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	sessionID := uuid.New()
 	service := &trackingHandlerTestService{
 		locations: []model.PublicPilotLocation{{
-			SessionID:     sessionID,
-			PilotNumber:   123456,
-			ChannelNumber: 456789,
-			AvatarID:      3,
-			PilotName:     "Sky Rider",
-			Latitude:      47.1,
-			Longitude:     8.5,
-			Altitude:      1200,
-			GroundSpeed:   12,
-			ObservedAt:    time.Now().UTC(),
+			SessionID:       sessionID,
+			PilotNumber:     123456,
+			ChannelNumber:   456789,
+			AvatarID:        3,
+			ProfileImageURL: "/api/v1/profile-images/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+			PilotName:       "Sky Rider",
+			Latitude:        47.1,
+			Longitude:       8.5,
+			Altitude:        1200,
+			GroundSpeed:     12,
+			ObservedAt:      time.Now().UTC(),
 			Path: []model.PublicPilotTrackPoint{{
 				SessionID:   sessionID,
 				Latitude:    47.1,
@@ -132,7 +133,11 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	if err := json.Unmarshal(locations[0]["avatar_id"], &publicAvatarID); err != nil || publicAvatarID != 3 {
 		t.Fatalf("public avatar id = %d, err=%v", publicAvatarID, err)
 	}
-	for _, sharedField := range []string{"pilot_name", "pilot_number", "channel_number", "avatar_id", "altitude", "speed", "path"} {
+	var publicProfileImageURL string
+	if err := json.Unmarshal(locations[0]["profile_image_url"], &publicProfileImageURL); err != nil || !strings.Contains(publicProfileImageURL, "/api/v1/profile-images/") {
+		t.Fatalf("public profile image URL = %q, err=%v", publicProfileImageURL, err)
+	}
+	for _, sharedField := range []string{"pilot_name", "pilot_number", "channel_number", "avatar_id", "profile_image_url", "altitude", "speed", "path"} {
 		if _, exists := locations[0][sharedField]; !exists {
 			t.Errorf("public location has no shared flight field %q", sharedField)
 		}

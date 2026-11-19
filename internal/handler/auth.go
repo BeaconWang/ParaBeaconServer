@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/internal/service"
 )
 
@@ -38,24 +39,27 @@ type logoutRequest struct {
 }
 
 type publicUser struct {
-	ID            string    `json:"id"`
-	Username      string    `json:"username"`
-	DisplayName   string    `json:"display_name"`
-	PilotNumber   int       `json:"pilot_number"`
-	ChannelNumber int       `json:"channel_number"`
-	AvatarID      int       `json:"avatar_id"`
-	Email         *string   `json:"email,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	Username        string    `json:"username"`
+	DisplayName     string    `json:"display_name"`
+	PilotNumber     int       `json:"pilot_number"`
+	ChannelNumber   int       `json:"channel_number"`
+	AvatarID        int       `json:"avatar_id"`
+	ProfileImageURL string    `json:"profile_image_url,omitempty"`
+	Email           *string   `json:"email,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
-func toPublicUser(userID, username, displayName string, pilotNumber *int, channelNumber, avatarID int, email *string, createdAt time.Time) publicUser {
+func toPublicUser(userID, username, displayName string, pilotNumber *int, channelNumber, avatarID int, profileImageKey string, email *string, createdAt time.Time) publicUser {
 	var number int
 	if pilotNumber != nil {
 		number = *pilotNumber
 	}
+	imageURL := repository.ProfileImageURL(profileImageKey)
 	return publicUser{
 		ID: userID, Username: username, DisplayName: displayName,
-		PilotNumber: number, ChannelNumber: channelNumber, AvatarID: avatarID, Email: email, CreatedAt: createdAt,
+		PilotNumber: number, ChannelNumber: channelNumber, AvatarID: avatarID,
+		ProfileImageURL: imageURL, Email: email, CreatedAt: createdAt,
 	}
 }
 
@@ -78,7 +82,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusCreated, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
@@ -112,7 +116,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		"token_type":   "Bearer",
 		"expires_at":   result.ExpiresAt,
 		"expires_in":   int(time.Until(result.ExpiresAt).Seconds()),
-		"user":         toPublicUser(result.User.ID.String(), result.User.Username, result.User.DisplayName, result.User.PilotNumber, result.User.ChannelNumber, result.User.AvatarID, result.User.Email, result.User.CreatedAt),
+		"user":         toPublicUser(result.User.ID.String(), result.User.Username, result.User.DisplayName, result.User.PilotNumber, result.User.ChannelNumber, result.User.AvatarID, result.User.ProfileImageKey, result.User.Email, result.User.CreatedAt),
 	}
 	if result.RefreshToken != "" {
 		response["refresh_token"] = result.RefreshToken

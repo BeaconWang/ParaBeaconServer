@@ -14,31 +14,35 @@ import (
 const ChatPageSize = 50
 
 type ChatUser struct {
-	ID            uuid.UUID
-	PilotNumber   int
-	ChannelNumber int
-	Username      string
-	DisplayName   string
-	AvatarID      int
+	ID              uuid.UUID
+	PilotNumber     int
+	ChannelNumber   int
+	Username        string
+	DisplayName     string
+	AvatarID        int
+	ProfileImageKey string
+	ProfileImageURL string
 }
 
 type ChatAccount struct {
-	PilotNumber int    `json:"pilot_number"`
-	Username    string `json:"username"`
-	DisplayName string `json:"display_name,omitempty"`
-	AvatarID    int    `json:"avatar_id"`
+	PilotNumber     int    `json:"pilot_number"`
+	Username        string `json:"username"`
+	DisplayName     string `json:"display_name,omitempty"`
+	AvatarID        int    `json:"avatar_id"`
+	ProfileImageURL string `json:"profile_image_url,omitempty"`
 }
 
 type ChatConversation struct {
-	PeerID      uuid.UUID  `json:"-"`
-	Online      bool       `json:"-"`
-	PilotNumber int        `json:"pilot_number"`
-	Username    string     `json:"username"`
-	DisplayName string     `json:"display_name,omitempty"`
-	AvatarID    int        `json:"avatar_id"`
-	LastChatAt  *time.Time `json:"last_chat_at,omitempty"`
-	Pinned      bool       `json:"pinned"`
-	PinnedAt    *time.Time `json:"-"`
+	PeerID          uuid.UUID  `json:"-"`
+	Online          bool       `json:"-"`
+	PilotNumber     int        `json:"pilot_number"`
+	Username        string     `json:"username"`
+	DisplayName     string     `json:"display_name,omitempty"`
+	AvatarID        int        `json:"avatar_id"`
+	ProfileImageURL string     `json:"profile_image_url,omitempty"`
+	LastChatAt      *time.Time `json:"last_chat_at,omitempty"`
+	Pinned          bool       `json:"pinned"`
+	PinnedAt        *time.Time `json:"-"`
 }
 
 type ChatRepository interface {
@@ -66,11 +70,12 @@ func (r *GormChatRepository) FindChatUserByID(ctx context.Context, id uuid.UUID)
 	var user ChatUser
 	if err := r.db.WithContext(ctx).
 		Table("users").
-		Select("id, pilot_number, channel_number, username, display_name, avatar_id").
+		Select("id, pilot_number, channel_number, username, display_name, avatar_id, profile_image_key").
 		Where("id = ?", id).
 		Take(&user).Error; err != nil {
 		return nil, fmt.Errorf("find chat user: %w", err)
 	}
+	user.ProfileImageURL = ProfileImageURL(user.ProfileImageKey)
 	return &user, nil
 }
 
@@ -78,11 +83,12 @@ func (r *GormChatRepository) FindChatUserByPilotNumber(ctx context.Context, numb
 	var user ChatUser
 	if err := r.db.WithContext(ctx).
 		Table("users").
-		Select("id, pilot_number, channel_number, username, avatar_id").
+		Select("id, pilot_number, channel_number, username, avatar_id, profile_image_key").
 		Where("pilot_number = ?", number).
 		Take(&user).Error; err != nil {
 		return nil, fmt.Errorf("find chat pilot: %w", err)
 	}
+	user.ProfileImageURL = ProfileImageURL(user.ProfileImageKey)
 	return &user, nil
 }
 
@@ -90,7 +96,7 @@ func (r *GormChatRepository) SearchChatAccounts(ctx context.Context, requesterID
 	accounts := make([]ChatAccount, 0, limit)
 	databaseQuery := r.db.WithContext(ctx).
 		Table("users").
-		Select("pilot_number, username, display_name, avatar_id").
+		Select("pilot_number, username, display_name, avatar_id, CASE WHEN profile_image_key <> '' THEN '/api/v1/profile-images/' || profile_image_key ELSE '' END AS profile_image_url").
 		Where("id <> ? AND pilot_number > ?", requesterID, afterPilotNumber)
 	if query != "" {
 		databaseQuery = databaseQuery.Where(
@@ -119,6 +125,7 @@ func (r *GormChatRepository) ListChatConversations(ctx context.Context, requeste
 		peer.username,
 		peer.display_name,
 		peer.avatar_id,
+		CASE WHEN peer.profile_image_key <> '' THEN '/api/v1/profile-images/' || peer.profile_image_key ELSE '' END AS profile_image_url,
 		latest.last_chat_at,
 		pins.pinned_at IS NOT NULL AS pinned,
 		pins.pinned_at,

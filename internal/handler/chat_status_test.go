@@ -169,7 +169,8 @@ func TestListConversationsIncludesOnlinePinAndRecentActivity(t *testing.T) {
 		requesterID: requesterID,
 		conversations: []repository.ChatConversation{{
 			PeerID: peerID, PilotNumber: 234567, Username: "friend", DisplayName: "Sky Friend",
-			AvatarID: 3, LastChatAt: &lastChatAt, Pinned: true, PinnedAt: &lastChatAt,
+			AvatarID: 3, ProfileImageURL: "/api/v1/profile-images/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+			LastChatAt: &lastChatAt, Pinned: true, PinnedAt: &lastChatAt,
 		}},
 	}
 	chat := service.NewChatService(repository)
@@ -189,11 +190,12 @@ func TestListConversationsIncludesOnlinePinAndRecentActivity(t *testing.T) {
 	}
 	var body struct {
 		Conversations []struct {
-			PilotNumber int        `json:"pilot_number"`
-			AvatarID    int        `json:"avatar_id"`
-			Online      bool       `json:"online"`
-			Pinned      bool       `json:"pinned"`
-			LastChatAt  *time.Time `json:"last_chat_at"`
+			PilotNumber     int        `json:"pilot_number"`
+			AvatarID        int        `json:"avatar_id"`
+			ProfileImageURL string     `json:"profile_image_url"`
+			Online          bool       `json:"online"`
+			Pinned          bool       `json:"pinned"`
+			LastChatAt      *time.Time `json:"last_chat_at"`
 		} `json:"conversations"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
@@ -203,7 +205,7 @@ func TestListConversationsIncludesOnlinePinAndRecentActivity(t *testing.T) {
 		t.Fatalf("conversation count = %d, want 1", len(body.Conversations))
 	}
 	conversation := body.Conversations[0]
-	if conversation.PilotNumber != 234567 || conversation.AvatarID != 3 || !conversation.Pinned || conversation.Online || conversation.LastChatAt == nil {
+	if conversation.PilotNumber != 234567 || conversation.AvatarID != 3 || conversation.ProfileImageURL == "" || !conversation.Pinned || conversation.Online || conversation.LastChatAt == nil {
 		t.Fatalf("conversation = %#v", conversation)
 	}
 }

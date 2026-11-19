@@ -4,5 +4,6 @@
 /bin/
 /dist/
 /data/apks/
+/data/profile-images/
 *.exe
 *.test

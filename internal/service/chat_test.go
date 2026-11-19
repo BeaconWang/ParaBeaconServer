@@ -407,7 +407,7 @@ func TestChatRoutesPublicChannelAndDirectMessages(t *testing.T) {
 	aliceID, bobID, carolID := uuid.New(), uuid.New(), uuid.New()
 	channelNumber := 345678
 	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
-		aliceID: {ID: aliceID, PilotNumber: 123456, ChannelNumber: channelNumber, Username: "alice", DisplayName: "Alice Ridge", AvatarID: 5},
+		aliceID: {ID: aliceID, PilotNumber: 123456, ChannelNumber: channelNumber, Username: "alice", DisplayName: "Alice Ridge", AvatarID: 5, ProfileImageURL: "/api/v1/profile-images/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},
 		bobID:   {ID: bobID, PilotNumber: 234567, ChannelNumber: channelNumber, Username: "bob"},
 		carolID: {ID: carolID, PilotNumber: 345678, ChannelNumber: channelNumber, Username: "carol"},
 	}}
@@ -417,7 +417,7 @@ func TestChatRoutesPublicChannelAndDirectMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("send public: %v", err)
 	}
-	if publicMessage.Text != "hello world" || publicMessage.SenderPilotNumber != 123456 || publicMessage.Scope != ChatScopePublic || publicMessage.SenderName != "Alice Ridge" || publicMessage.SenderAvatarID != 5 {
+	if publicMessage.Text != "hello world" || publicMessage.SenderPilotNumber != 123456 || publicMessage.Scope != ChatScopePublic || publicMessage.SenderName != "Alice Ridge" || publicMessage.SenderAvatarID != 5 || publicMessage.SenderProfileImageURL == "" {
 		t.Fatalf("public message = %#v", publicMessage)
 	}
 	chat.rateMu.Lock()

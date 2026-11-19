@@ -14,22 +14,23 @@ import (
 )
 
 type Config struct {
-	Environment          string
-	HTTPAddress          string
-	DatabaseDSN          string
-	RedisURL             string
-	JWTSecret            string
-	JWTIssuer            string
-	JWTExpiry            time.Duration
-	CORSAllowedOrigin    []string
-	TrustedProxies       []string
-	APKStorageDir        string
-	APKPackageName       string
-	APKReleaseAdminToken string
-	FlightLogStorageDir  string
-	COSBucketURL         string
-	COSSecretID          string
-	COSSecretKey         string
+	Environment            string
+	HTTPAddress            string
+	DatabaseDSN            string
+	RedisURL               string
+	JWTSecret              string
+	JWTIssuer              string
+	JWTExpiry              time.Duration
+	CORSAllowedOrigin      []string
+	TrustedProxies         []string
+	APKStorageDir          string
+	APKPackageName         string
+	APKReleaseAdminToken   string
+	FlightLogStorageDir    string
+	ProfileImageStorageDir string
+	COSBucketURL           string
+	COSSecretID            string
+	COSSecretKey           string
 }
 
 func Load() (Config, error) {
@@ -69,22 +70,23 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		Environment:          environment,
-		HTTPAddress:          net.JoinHostPort(httpHost, port),
-		DatabaseDSN:          databaseDSN,
-		RedisURL:             strings.TrimSpace(os.Getenv("REDIS_URL")),
-		JWTSecret:            os.Getenv("JWT_SECRET"),
-		JWTIssuer:            env("JWT_ISSUER", "parabeacon-api"),
-		JWTExpiry:            expiry,
-		CORSAllowedOrigin:    splitCSV(os.Getenv("CORS_ALLOWED_ORIGINS")),
-		TrustedProxies:       splitCSV(os.Getenv("TRUSTED_PROXIES")),
-		APKStorageDir:        env("APK_STORAGE_DIR", "./data/apks"),
-		APKPackageName:       env("APK_PACKAGE_NAME", "com.beacon.parabeacon"),
-		APKReleaseAdminToken: os.Getenv("APK_RELEASE_ADMIN_TOKEN"),
-		FlightLogStorageDir:  env("FLIGHT_LOG_STORAGE_DIR", "./data/flights"),
-		COSBucketURL:         cosBucketURL,
-		COSSecretID:          cosSecretID,
-		COSSecretKey:         cosSecretKey,
+		Environment:            environment,
+		HTTPAddress:            net.JoinHostPort(httpHost, port),
+		DatabaseDSN:            databaseDSN,
+		RedisURL:               strings.TrimSpace(os.Getenv("REDIS_URL")),
+		JWTSecret:              os.Getenv("JWT_SECRET"),
+		JWTIssuer:              env("JWT_ISSUER", "parabeacon-api"),
+		JWTExpiry:              expiry,
+		CORSAllowedOrigin:      splitCSV(os.Getenv("CORS_ALLOWED_ORIGINS")),
+		TrustedProxies:         splitCSV(os.Getenv("TRUSTED_PROXIES")),
+		APKStorageDir:          env("APK_STORAGE_DIR", "./data/apks"),
+		APKPackageName:         env("APK_PACKAGE_NAME", "com.beacon.parabeacon"),
+		APKReleaseAdminToken:   os.Getenv("APK_RELEASE_ADMIN_TOKEN"),
+		FlightLogStorageDir:    env("FLIGHT_LOG_STORAGE_DIR", "./data/flights"),
+		ProfileImageStorageDir: env("PROFILE_IMAGE_STORAGE_DIR", "./data/profile-images"),
+		COSBucketURL:           cosBucketURL,
+		COSSecretID:            cosSecretID,
+		COSSecretKey:           cosSecretKey,
 	}
 	if cfg.DatabaseDSN == "" {
 		return Config{}, fmt.Errorf("DATABASE_DSN is required")

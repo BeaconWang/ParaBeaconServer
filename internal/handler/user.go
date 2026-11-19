@@ -122,7 +122,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
 }
 
 func (h *UserHandler) Profile(c *gin.Context) {
@@ -145,5 +145,5 @@ func (h *UserHandler) Profile(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
 }
