@@ -42,8 +42,10 @@ func TestOnlineUsersReportsAuthenticatedSocketConnections(t *testing.T) {
 	defer hub.Close()
 	friendID, otherID := uuid.New(), uuid.New()
 	client := &chatClient{userID: friendID}
+	secondDevice := &chatClient{userID: friendID}
 	hub.mu.Lock()
 	hub.clients[client] = struct{}{}
+	hub.clients[secondDevice] = struct{}{}
 	hub.mu.Unlock()
 
 	statuses, err := hub.OnlineUsers(context.Background(), []uuid.UUID{friendID, otherID, friendID})
@@ -60,6 +62,14 @@ func TestOnlineUsersReportsAuthenticatedSocketConnections(t *testing.T) {
 
 	hub.mu.Lock()
 	delete(hub.clients, client)
+	hub.mu.Unlock()
+	statuses, err = hub.OnlineUsers(context.Background(), []uuid.UUID{friendID})
+	if err != nil || !statuses[friendID] {
+		t.Fatalf("pilot with another device online=%v err=%v, want online", statuses[friendID], err)
+	}
+
+	hub.mu.Lock()
+	delete(hub.clients, secondDevice)
 	hub.mu.Unlock()
 	statuses, err = hub.OnlineUsers(context.Background(), []uuid.UUID{friendID})
 	if err != nil || statuses[friendID] {
