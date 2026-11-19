@@ -30,6 +30,9 @@ type chatStatusTestRepository struct {
 	conversations []repository.ChatConversation
 	pinnedPeer    uuid.UUID
 	pinned        bool
+	readOwner     uuid.UUID
+	readPeer      uuid.UUID
+	readAt        time.Time
 }
 
 func (r *chatStatusTestRepository) FindChatUserByID(_ context.Context, id uuid.UUID) (*repository.ChatUser, error) {
@@ -86,6 +89,17 @@ func (r *chatStatusTestRepository) ListChatConversations(_ context.Context, _ uu
 func (r *chatStatusTestRepository) SetChatConversationPinned(_ context.Context, _, peerID uuid.UUID, pinned bool, _ time.Time) error {
 	r.pinnedPeer = peerID
 	r.pinned = pinned
+	return nil
+}
+
+func (*chatStatusTestRepository) EnsureChatConversationRead(context.Context, uuid.UUID, uuid.UUID, time.Time) error {
+	return nil
+}
+
+func (r *chatStatusTestRepository) MarkChatConversationRead(_ context.Context, ownerID, peerID uuid.UUID, readAt time.Time) error {
+	r.readOwner = ownerID
+	r.readPeer = peerID
+	r.readAt = readAt
 	return nil
 }
 
@@ -170,7 +184,7 @@ func TestListConversationsIncludesOnlinePinAndRecentActivity(t *testing.T) {
 		conversations: []repository.ChatConversation{{
 			PeerID: peerID, PilotNumber: 234567, Username: "friend", DisplayName: "Sky Friend",
 			AvatarID: 3, ProfileImageURL: "/api/v1/profile-images/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-			LastChatAt: &lastChatAt, Pinned: true, PinnedAt: &lastChatAt,
+			LastChatAt: &lastChatAt, UnreadCount: 4, Pinned: true, PinnedAt: &lastChatAt,
 		}},
 	}
 	chat := service.NewChatService(repository)
@@ -195,6 +209,7 @@ func TestListConversationsIncludesOnlinePinAndRecentActivity(t *testing.T) {
 			ProfileImageURL string     `json:"profile_image_url"`
 			Online          bool       `json:"online"`
 			Pinned          bool       `json:"pinned"`
+			UnreadCount     int64      `json:"unread_count"`
 			LastChatAt      *time.Time `json:"last_chat_at"`
 		} `json:"conversations"`
 	}
@@ -205,7 +220,7 @@ func TestListConversationsIncludesOnlinePinAndRecentActivity(t *testing.T) {
 		t.Fatalf("conversation count = %d, want 1", len(body.Conversations))
 	}
 	conversation := body.Conversations[0]
-	if conversation.PilotNumber != 234567 || conversation.AvatarID != 3 || conversation.ProfileImageURL == "" || !conversation.Pinned || conversation.Online || conversation.LastChatAt == nil {
+	if conversation.PilotNumber != 234567 || conversation.AvatarID != 3 || conversation.ProfileImageURL == "" || !conversation.Pinned || conversation.Online || conversation.UnreadCount != 4 || conversation.LastChatAt == nil {
 		t.Fatalf("conversation = %#v", conversation)
 	}
 }
@@ -239,6 +254,35 @@ func TestSetConversationPinnedRequiresAuthenticatedSameChannelPeer(t *testing.T)
 	anonymous.ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous pin status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestMarkConversationReadRequiresAuthenticatedPeer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requesterID, peerID := uuid.New(), uuid.New()
+	testRepository := &chatStatusTestRepository{pilotID: peerID, requesterID: requesterID}
+	chat := service.NewChatService(testRepository)
+	handler := NewChatHandler(chat, nil)
+	engine := gin.New()
+	engine.PUT("/chat/conversations/:pilot_number/read", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, requesterID)
+		handler.MarkConversationRead(c)
+	})
+
+	request := httptest.NewRequest(http.MethodPut, "/chat/conversations/234567/read", nil)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || testRepository.readOwner != requesterID || testRepository.readPeer != peerID || testRepository.readAt.IsZero() {
+		t.Fatalf("mark read response = %d %s, owner=%s peer=%s at=%v", response.Code, response.Body.String(), testRepository.readOwner, testRepository.readPeer, testRepository.readAt)
+	}
+
+	anonymous := gin.New()
+	anonymous.PUT("/chat/conversations/:pilot_number/read", handler.MarkConversationRead)
+	request = httptest.NewRequest(http.MethodPut, "/chat/conversations/234567/read", nil)
+	response = httptest.NewRecorder()
+	anonymous.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous mark-read status = %d, want 401", response.Code)
 	}
 }
 

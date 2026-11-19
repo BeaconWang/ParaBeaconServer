@@ -14,11 +14,17 @@ import (
 	"gorm.io/gorm"
 )
 
+type chatReadPair struct {
+	owner uuid.UUID
+	peer  uuid.UUID
+}
+
 type memoryChatRepository struct {
 	users          map[uuid.UUID]repository.ChatUser
 	messages       []model.ChatMessage
 	locationStatus map[int]bool
 	pins           map[uuid.UUID]map[uuid.UUID]time.Time
+	readStates     map[chatReadPair]time.Time
 }
 
 func (r *memoryChatRepository) FindChatUserByID(_ context.Context, id uuid.UUID) (*repository.ChatUser, error) {
@@ -87,6 +93,15 @@ func (r *memoryChatRepository) ListChatConversations(_ context.Context, requeste
 			PeerID: id, Online: online, PilotNumber: user.PilotNumber, Username: user.Username,
 			DisplayName: user.DisplayName, AvatarID: user.AvatarID,
 		}
+		if lastReadAt, ok := r.readStates[chatReadPair{owner: requesterID, peer: id}]; ok {
+			for _, message := range r.messages {
+				if message.Scope == ChatScopeDirect && message.RecipientID != nil &&
+					message.SenderID == id && *message.RecipientID == requesterID &&
+					message.CreatedAt.After(lastReadAt) {
+					conversation.UnreadCount++
+				}
+			}
+		}
 		for _, message := range r.messages {
 			if message.Scope != ChatScopeDirect || message.RecipientID == nil ||
 				!((message.SenderID == requesterID && *message.RecipientID == id) ||
@@ -107,14 +122,22 @@ func (r *memoryChatRepository) ListChatConversations(_ context.Context, requeste
 	}
 	sort.Slice(conversations, func(i, j int) bool {
 		left, right := conversations[i], conversations[j]
-		if left.Online != right.Online {
-			return left.Online
-		}
 		if left.Pinned != right.Pinned {
 			return left.Pinned
 		}
-		if left.Pinned && right.Pinned && !left.PinnedAt.Equal(*right.PinnedAt) {
-			return left.PinnedAt.Before(*right.PinnedAt)
+		if left.Online != right.Online {
+			return left.Online
+		}
+		if left.LastChatAt != nil || right.LastChatAt != nil {
+			if left.LastChatAt == nil {
+				return false
+			}
+			if right.LastChatAt == nil {
+				return true
+			}
+			if !left.LastChatAt.Equal(*right.LastChatAt) {
+				return left.LastChatAt.After(*right.LastChatAt)
+			}
 		}
 		leftName := strings.ToLower(strings.TrimSpace(left.DisplayName))
 		if leftName == "" {
@@ -150,6 +173,28 @@ func (r *memoryChatRepository) SetChatConversationPinned(_ context.Context, owne
 		r.pins[ownerID][peerID] = pinnedAt
 	} else {
 		delete(r.pins[ownerID], peerID)
+	}
+	return nil
+}
+
+func (r *memoryChatRepository) EnsureChatConversationRead(_ context.Context, ownerID, peerID uuid.UUID, readAt time.Time) error {
+	if r.readStates == nil {
+		r.readStates = make(map[chatReadPair]time.Time)
+	}
+	key := chatReadPair{owner: ownerID, peer: peerID}
+	if _, exists := r.readStates[key]; !exists {
+		r.readStates[key] = readAt
+	}
+	return nil
+}
+
+func (r *memoryChatRepository) MarkChatConversationRead(_ context.Context, ownerID, peerID uuid.UUID, readAt time.Time) error {
+	if r.readStates == nil {
+		r.readStates = make(map[chatReadPair]time.Time)
+	}
+	key := chatReadPair{owner: ownerID, peer: peerID}
+	if previous, exists := r.readStates[key]; !exists || readAt.After(previous) {
+		r.readStates[key] = readAt
 	}
 	return nil
 }
@@ -251,7 +296,7 @@ func TestSearchAccountsFindsUsernameAndDisplayNameAndPages(t *testing.T) {
 	}
 }
 
-func TestListConversationsShowsAllPilotsOnlineFirstThenByName(t *testing.T) {
+func TestListConversationsSortsPinnedOnlineAndRecent(t *testing.T) {
 	requesterID, recentID, oldID, pinnedID, otherChannelID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	lastRecent := now.Add(-time.Minute)
@@ -289,21 +334,21 @@ func TestListConversationsShowsAllPilotsOnlineFirstThenByName(t *testing.T) {
 	if page.Conversations[0].PilotNumber != 100004 || !page.Conversations[0].Online || !page.Conversations[0].Pinned {
 		t.Fatalf("first conversation = %#v", page.Conversations[0])
 	}
-	if page.Conversations[1].PilotNumber != 100005 || !page.Conversations[1].Online {
-		t.Fatalf("online pilot from another channel missing: %#v", page.Conversations[1])
+	if page.Conversations[1].PilotNumber != 100003 || page.Conversations[1].Online || !page.Conversations[1].Pinned {
+		t.Fatalf("offline pinned pilot must precede unpinned online pilots: %#v", page.Conversations[1])
 	}
 	secondPage, err := chat.ListConversations(context.Background(), requesterID, onlineIDs, "", page.NextCursor, 2)
 	if err != nil || len(secondPage.Conversations) != 2 {
 		t.Fatalf("second conversation page = %#v, err=%v", secondPage, err)
 	}
 	if secondPage.Conversations[0].PilotNumber != 100002 || !secondPage.Conversations[0].Online || secondPage.Conversations[0].LastChatAt == nil || !secondPage.Conversations[0].LastChatAt.Equal(lastRecent) {
-		t.Fatalf("online alphabetical conversation = %#v", secondPage.Conversations[0])
+		t.Fatalf("most recent online conversation = %#v", secondPage.Conversations[0])
 	}
 	if secondPage.Conversations[0].AvatarID != 2 {
 		t.Fatalf("conversation avatar id = %d, want 2", secondPage.Conversations[0].AvatarID)
 	}
-	if secondPage.Conversations[1].PilotNumber != 100003 || secondPage.Conversations[1].Online || !secondPage.Conversations[1].Pinned {
-		t.Fatalf("offline pilot should follow all online pilots: %#v", secondPage.Conversations[1])
+	if secondPage.Conversations[1].PilotNumber != 100005 || !secondPage.Conversations[1].Online {
+		t.Fatalf("next online pilot must precede offline conversations: %#v", secondPage.Conversations[1])
 	}
 	searched, err := chat.ListConversations(context.Background(), requesterID, onlineIDs, "recent", "", 10)
 	if err != nil || len(searched.Conversations) != 1 || searched.Conversations[0].PilotNumber != 100002 {
@@ -317,11 +362,56 @@ func TestListConversationsShowsAllPilotsOnlineFirstThenByName(t *testing.T) {
 		t.Fatalf("unpin offline conversation: %v", err)
 	}
 	unpinned, err := chat.ListConversations(context.Background(), requesterID, onlineIDs, "", "", 10)
-	if err != nil || len(unpinned.Conversations) != 4 || unpinned.Conversations[0].PilotNumber != 100005 || unpinned.Conversations[1].PilotNumber != 100002 || unpinned.Conversations[2].PilotNumber != 100004 || unpinned.Conversations[3].PilotNumber != 100003 {
-		t.Fatalf("online-first alphabetical ordering = %#v, err=%v", unpinned, err)
+	if err != nil || len(unpinned.Conversations) != 4 || unpinned.Conversations[0].PilotNumber != 100002 || unpinned.Conversations[1].PilotNumber != 100005 || unpinned.Conversations[2].PilotNumber != 100004 || unpinned.Conversations[3].PilotNumber != 100003 {
+		t.Fatalf("pinned/online/recent ordering = %#v, err=%v", unpinned, err)
 	}
 	if _, err := chat.ListConversations(context.Background(), requesterID, onlineIDs, "x", "", 10); !errors.Is(err, ErrInvalidChatRequest) {
 		t.Fatalf("short conversation search error = %v, want invalid request", err)
+	}
+}
+
+func TestDirectConversationUnreadCountTracksIncomingMessagesAndReadState(t *testing.T) {
+	ownerID, peerID := uuid.New(), uuid.New()
+	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
+		ownerID: {ID: ownerID, PilotNumber: 123456, Username: "owner"},
+		peerID:  {ID: peerID, PilotNumber: 234567, Username: "peer"},
+	}}
+	chat := NewChatService(repository)
+
+	for index, text := range []string{"first unread", "second unread"} {
+		if index > 0 {
+			chat.lastSent[peerID] = time.Now().Add(-time.Second)
+		}
+		if _, err := chat.Send(context.Background(), peerID, SendChatRequest{
+			Scope: ChatScopeDirect, PilotNumber: 123456, Text: text,
+		}); err != nil {
+			t.Fatalf("send direct message %q: %v", text, err)
+		}
+	}
+	page, err := chat.ListConversations(context.Background(), ownerID, nil, "", "", 10)
+	if err != nil || len(page.Conversations) != 1 || page.Conversations[0].UnreadCount != 2 {
+		t.Fatalf("unread conversations = %#v, err=%v; want count 2", page, err)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	if err := chat.MarkConversationRead(context.Background(), ownerID, 234567); err != nil {
+		t.Fatalf("mark direct conversation read: %v", err)
+	}
+	page, err = chat.ListConversations(context.Background(), ownerID, nil, "", "", 10)
+	if err != nil || len(page.Conversations) != 1 || page.Conversations[0].UnreadCount != 0 {
+		t.Fatalf("read conversation = %#v, err=%v; want count 0", page, err)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	chat.lastSent[peerID] = time.Now().Add(-time.Second)
+	if _, err := chat.Send(context.Background(), peerID, SendChatRequest{
+		Scope: ChatScopeDirect, PilotNumber: 123456, Text: "new unread",
+	}); err != nil {
+		t.Fatalf("send new direct message: %v", err)
+	}
+	page, err = chat.ListConversations(context.Background(), ownerID, nil, "", "", 10)
+	if err != nil || len(page.Conversations) != 1 || page.Conversations[0].UnreadCount != 1 {
+		t.Fatalf("new unread conversation = %#v, err=%v; want count 1", page, err)
 	}
 }
 

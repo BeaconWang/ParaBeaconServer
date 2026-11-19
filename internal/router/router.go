@@ -148,6 +148,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.GET("/chat/accounts", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), chatHandler.SearchAccounts)
 		protected.GET("/chat/conversations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), chatHandler.ListConversations)
 		protected.PUT("/chat/conversations/:pilot_number/pin", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), chatHandler.SetConversationPinned)
+		protected.PUT("/chat/conversations/:pilot_number/read", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), chatHandler.MarkConversationRead)
 		protected.GET("/chat/pilots/:pilot_number/location-status", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), chatHandler.PilotLocationStatus)
 		protected.POST("/chat/socket-ticket", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), chatHandler.IssueSocketTicket)
 		v1.GET("/chat/ws", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), chatHandler.WebSocket(cfg.CORSAllowedOrigin))

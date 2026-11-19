@@ -41,6 +41,7 @@ type ChatConversation struct {
 	AvatarID        int        `json:"avatar_id"`
 	ProfileImageURL string     `json:"profile_image_url,omitempty"`
 	LastChatAt      *time.Time `json:"last_chat_at,omitempty"`
+	UnreadCount     int64      `json:"unread_count"`
 	Pinned          bool       `json:"pinned"`
 	PinnedAt        *time.Time `json:"-"`
 }
@@ -51,6 +52,8 @@ type ChatRepository interface {
 	SearchChatAccounts(context.Context, uuid.UUID, string, int, int) ([]ChatAccount, error)
 	ListChatConversations(context.Context, uuid.UUID, string, []uuid.UUID, int, int) ([]ChatConversation, error)
 	SetChatConversationPinned(context.Context, uuid.UUID, uuid.UUID, bool, time.Time) error
+	EnsureChatConversationRead(context.Context, uuid.UUID, uuid.UUID, time.Time) error
+	MarkChatConversationRead(context.Context, uuid.UUID, uuid.UUID, time.Time) error
 	CreateChatMessage(context.Context, *model.ChatMessage) error
 	ListPublicChat(context.Context, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
 	ListChannelChat(context.Context, int, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
@@ -127,6 +130,7 @@ func (r *GormChatRepository) ListChatConversations(ctx context.Context, requeste
 		peer.avatar_id,
 		CASE WHEN peer.profile_image_key <> '' THEN '/api/v1/profile-images/' || peer.profile_image_key ELSE '' END AS profile_image_url,
 		latest.last_chat_at,
+		COALESCE(unread.unread_count, 0) AS unread_count,
 		pins.pinned_at IS NOT NULL AS pinned,
 		pins.pinned_at,
 		` + selectOnline
@@ -135,6 +139,7 @@ func (r *GormChatRepository) ListChatConversations(ctx context.Context, requeste
 		Select(selection, onlineArgs...).
 		Joins("JOIN users AS owner ON owner.id = ?", requesterID).
 		Joins("LEFT JOIN chat_conversation_pins AS pins ON pins.owner_id = owner.id AND pins.peer_id = peer.id").
+		Joins("LEFT JOIN chat_conversation_reads AS reads ON reads.owner_id = owner.id AND reads.peer_id = peer.id").
 		Joins(`LEFT JOIN LATERAL (
 			SELECT MAX(message.created_at) AS last_chat_at
 			FROM chat_messages AS message
@@ -142,6 +147,14 @@ func (r *GormChatRepository) ListChatConversations(ctx context.Context, requeste
 				AND ((message.sender_id = owner.id AND message.recipient_id = peer.id)
 					OR (message.sender_id = peer.id AND message.recipient_id = owner.id))
 		) AS latest ON TRUE`, "direct").
+		Joins(`LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS unread_count
+			FROM chat_messages AS unread_message
+			WHERE unread_message.scope = ?
+				AND unread_message.sender_id = peer.id
+				AND unread_message.recipient_id = owner.id
+				AND unread_message.created_at > COALESCE(reads.last_read_at, latest.last_chat_at)
+		) AS unread ON TRUE`, "direct").
 		Where("peer.id <> owner.id")
 	if query != "" {
 		databaseQuery = databaseQuery.Where(
@@ -151,13 +164,44 @@ func (r *GormChatRepository) ListChatConversations(ctx context.Context, requeste
 		)
 	}
 	if err := databaseQuery.
-		Order("online DESC, (pins.pinned_at IS NOT NULL) DESC, pins.pinned_at ASC, LOWER(COALESCE(NULLIF(BTRIM(peer.display_name), ''), peer.username)) ASC, peer.pilot_number ASC").
+		Order("(pins.pinned_at IS NOT NULL) DESC, online DESC, latest.last_chat_at DESC NULLS LAST, LOWER(COALESCE(NULLIF(BTRIM(peer.display_name), ''), peer.username)) ASC, peer.pilot_number ASC").
 		Offset(offset).
 		Limit(limit).
 		Scan(&conversations).Error; err != nil {
 		return nil, fmt.Errorf("list chat conversations: %w", err)
 	}
 	return conversations, nil
+}
+
+func (r *GormChatRepository) EnsureChatConversationRead(ctx context.Context, ownerID, peerID uuid.UUID, readAt time.Time) error {
+	if ownerID == uuid.Nil || peerID == uuid.Nil || ownerID == peerID {
+		return fmt.Errorf("invalid chat read state")
+	}
+	readState := model.ChatConversationRead{
+		OwnerID: ownerID, PeerID: peerID, LastReadAt: readAt.UTC(),
+	}
+	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&readState).Error; err != nil {
+		return fmt.Errorf("initialize chat read state: %w", err)
+	}
+	return nil
+}
+
+func (r *GormChatRepository) MarkChatConversationRead(ctx context.Context, ownerID, peerID uuid.UUID, readAt time.Time) error {
+	if ownerID == uuid.Nil || peerID == uuid.Nil || ownerID == peerID {
+		return fmt.Errorf("invalid chat read state")
+	}
+	readState := model.ChatConversationRead{
+		OwnerID: ownerID, PeerID: peerID, LastReadAt: readAt.UTC(),
+	}
+	if err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "owner_id"}, {Name: "peer_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"last_read_at": gorm.Expr("GREATEST(chat_conversation_reads.last_read_at, EXCLUDED.last_read_at)"),
+		}),
+	}).Create(&readState).Error; err != nil {
+		return fmt.Errorf("mark chat conversation read: %w", err)
+	}
+	return nil
 }
 
 func (r *GormChatRepository) SetChatConversationPinned(ctx context.Context, ownerID, peerID uuid.UUID, pinned bool, pinnedAt time.Time) error {

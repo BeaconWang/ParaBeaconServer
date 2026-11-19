@@ -120,6 +120,24 @@ func (h *ChatHandler) SetConversationPinned(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"pinned": *request.Pinned})
 }
 
+func (h *ChatHandler) MarkConversationRead(c *gin.Context) {
+	userID, ok := chatRequesterID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	pilotNumber, err := strconv.Atoi(c.Param("pilot_number"))
+	if err != nil || pilotNumber < 100000 || pilotNumber > 999999 {
+		respondError(c, http.StatusBadRequest, "invalid pilot number")
+		return
+	}
+	if err := h.chat.MarkConversationRead(c.Request.Context(), userID, pilotNumber); err != nil {
+		respondChatError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"read": true})
+}
+
 func (h *ChatHandler) SearchAccounts(c *gin.Context) {
 	userID, ok := chatRequesterID(c)
 	if !ok {

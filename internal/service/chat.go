@@ -177,6 +177,15 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 	}
 	s.rateMu.Unlock()
 	message.CreatedAt = now
+	if message.Scope == ChatScopeDirect && message.RecipientID != nil {
+		baseline := now.Add(-time.Microsecond)
+		if err := s.repository.EnsureChatConversationRead(ctx, senderID, *message.RecipientID, baseline); err != nil {
+			return ChatMessage{}, err
+		}
+		if err := s.repository.EnsureChatConversationRead(ctx, *message.RecipientID, senderID, baseline); err != nil {
+			return ChatMessage{}, err
+		}
+	}
 	if err := s.repository.CreateChatMessage(ctx, message); err != nil {
 		return ChatMessage{}, err
 	}
@@ -277,6 +286,17 @@ func (s *ChatService) SetConversationPinned(ctx context.Context, requesterID uui
 		return err
 	}
 	if err := s.repository.SetChatConversationPinned(ctx, requesterID, peerID, pinned, time.Now().UTC()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *ChatService) MarkConversationRead(ctx context.Context, userID uuid.UUID, pilotNumber int) error {
+	peerID, err := s.SubscribePeer(ctx, userID, pilotNumber)
+	if err != nil {
+		return err
+	}
+	if err := s.repository.MarkChatConversationRead(ctx, userID, peerID, time.Now().UTC()); err != nil {
 		return err
 	}
 	return nil
