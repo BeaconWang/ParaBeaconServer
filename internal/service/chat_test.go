@@ -59,6 +59,7 @@ func (r *memoryChatRepository) SearchChatAccounts(_ context.Context, requesterID
 			PilotNumber: user.PilotNumber,
 			Username:    user.Username,
 			DisplayName: user.DisplayName,
+			AvatarID:    user.AvatarID,
 		})
 	}
 	sort.Slice(accounts, func(i, j int) bool {
@@ -121,7 +122,7 @@ func TestSearchAccountsFindsUsernameAndDisplayNameAndPages(t *testing.T) {
 	requesterID, aliceID, bobID, carolID, otherChannelID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
 		requesterID:    {ID: requesterID, PilotNumber: 100001, ChannelNumber: 456789, Username: "my_account", DisplayName: "My Name"},
-		aliceID:        {ID: aliceID, PilotNumber: 100002, ChannelNumber: 456789, Username: "ridge_runner", DisplayName: "Alice Summit"},
+		aliceID:        {ID: aliceID, PilotNumber: 100002, ChannelNumber: 456789, Username: "ridge_runner", DisplayName: "Alice Summit", AvatarID: 4},
 		bobID:          {ID: bobID, PilotNumber: 100003, ChannelNumber: 456789, Username: "bob_wings", DisplayName: "Robert Cloud"},
 		carolID:        {ID: carolID, PilotNumber: 100004, ChannelNumber: 456789, Username: "carol", DisplayName: "Alice Ridge"},
 		otherChannelID: {ID: otherChannelID, PilotNumber: 100005, ChannelNumber: 456780, Username: "alice_other", DisplayName: "Alice Other"},
@@ -141,6 +142,9 @@ func TestSearchAccountsFindsUsernameAndDisplayNameAndPages(t *testing.T) {
 	}
 	if len(byDisplayName.Accounts) != 2 || byDisplayName.Accounts[0].DisplayName != "Alice Summit" {
 		t.Fatalf("display-name matches = %#v", byDisplayName.Accounts)
+	}
+	if byDisplayName.Accounts[0].AvatarID != 4 {
+		t.Fatalf("account avatar id = %d, want 4", byDisplayName.Accounts[0].AvatarID)
 	}
 
 	firstPage, err := chat.SearchAccounts(context.Background(), requesterID, "", "", 2)
@@ -245,7 +249,7 @@ func TestChatRoutesPublicChannelAndDirectMessages(t *testing.T) {
 	aliceID, bobID, carolID := uuid.New(), uuid.New(), uuid.New()
 	channelNumber := 345678
 	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
-		aliceID: {ID: aliceID, PilotNumber: 123456, ChannelNumber: channelNumber, Username: "alice", DisplayName: "Alice Ridge"},
+		aliceID: {ID: aliceID, PilotNumber: 123456, ChannelNumber: channelNumber, Username: "alice", DisplayName: "Alice Ridge", AvatarID: 5},
 		bobID:   {ID: bobID, PilotNumber: 234567, ChannelNumber: channelNumber, Username: "bob"},
 		carolID: {ID: carolID, PilotNumber: 345678, ChannelNumber: channelNumber, Username: "carol"},
 	}}
@@ -255,7 +259,7 @@ func TestChatRoutesPublicChannelAndDirectMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("send public: %v", err)
 	}
-	if publicMessage.Text != "hello world" || publicMessage.SenderPilotNumber != 123456 || publicMessage.Scope != ChatScopePublic || publicMessage.SenderName != "Alice Ridge" {
+	if publicMessage.Text != "hello world" || publicMessage.SenderPilotNumber != 123456 || publicMessage.Scope != ChatScopePublic || publicMessage.SenderName != "Alice Ridge" || publicMessage.SenderAvatarID != 5 {
 		t.Fatalf("public message = %#v", publicMessage)
 	}
 	chat.rateMu.Lock()

@@ -18,6 +18,7 @@ type UserRepository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
 	UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error
 	UpdateChannelNumber(ctx context.Context, id uuid.UUID, channelNumber int) error
+	UpdateAvatarID(ctx context.Context, id uuid.UUID, avatarID int) error
 }
 
 type PasswordChangeRepository interface {
@@ -89,6 +90,17 @@ func (r *GormUserRepository) UpdateChannelNumber(ctx context.Context, id uuid.UU
 	result := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("channel_number", channelNumber)
 	if result.Error != nil {
 		return fmt.Errorf("update user channel number: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (r *GormUserRepository) UpdateAvatarID(ctx context.Context, id uuid.UUID, avatarID int) error {
+	result := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("avatar_id", avatarID)
+	if result.Error != nil {
+		return fmt.Errorf("update user avatar: %w", result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound

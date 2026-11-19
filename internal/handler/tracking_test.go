@@ -66,6 +66,7 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 			SessionID:     sessionID,
 			PilotNumber:   123456,
 			ChannelNumber: 456789,
+			AvatarID:      3,
 			PilotName:     "Sky Rider",
 			Latitude:      47.1,
 			Longitude:     8.5,
@@ -127,7 +128,11 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	if err := json.Unmarshal(locations[0]["channel_number"], &publicChannelNumber); err != nil || publicChannelNumber != 456789 {
 		t.Fatalf("public channel number = %d, err=%v", publicChannelNumber, err)
 	}
-	for _, sharedField := range []string{"pilot_name", "pilot_number", "channel_number", "altitude", "speed", "path"} {
+	var publicAvatarID int
+	if err := json.Unmarshal(locations[0]["avatar_id"], &publicAvatarID); err != nil || publicAvatarID != 3 {
+		t.Fatalf("public avatar id = %d, err=%v", publicAvatarID, err)
+	}
+	for _, sharedField := range []string{"pilot_name", "pilot_number", "channel_number", "avatar_id", "altitude", "speed", "path"} {
 		if _, exists := locations[0][sharedField]; !exists {
 			t.Errorf("public location has no shared flight field %q", sharedField)
 		}

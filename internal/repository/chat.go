@@ -18,12 +18,14 @@ type ChatUser struct {
 	ChannelNumber int
 	Username      string
 	DisplayName   string
+	AvatarID      int
 }
 
 type ChatAccount struct {
 	PilotNumber int    `json:"pilot_number"`
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name,omitempty"`
+	AvatarID    int    `json:"avatar_id"`
 }
 
 type ChatRepository interface {
@@ -49,7 +51,7 @@ func (r *GormChatRepository) FindChatUserByID(ctx context.Context, id uuid.UUID)
 	var user ChatUser
 	if err := r.db.WithContext(ctx).
 		Table("users").
-		Select("id, pilot_number, channel_number, username, display_name").
+		Select("id, pilot_number, channel_number, username, display_name, avatar_id").
 		Where("id = ?", id).
 		Take(&user).Error; err != nil {
 		return nil, fmt.Errorf("find chat user: %w", err)
@@ -61,7 +63,7 @@ func (r *GormChatRepository) FindChatUserByPilotNumber(ctx context.Context, numb
 	var user ChatUser
 	if err := r.db.WithContext(ctx).
 		Table("users").
-		Select("id, pilot_number, channel_number, username").
+		Select("id, pilot_number, channel_number, username, avatar_id").
 		Where("pilot_number = ?", number).
 		Take(&user).Error; err != nil {
 		return nil, fmt.Errorf("find chat pilot: %w", err)
@@ -73,7 +75,7 @@ func (r *GormChatRepository) SearchChatAccounts(ctx context.Context, requesterID
 	accounts := make([]ChatAccount, 0, limit)
 	databaseQuery := r.db.WithContext(ctx).
 		Table("users").
-		Select("pilot_number, username, display_name").
+		Select("pilot_number, username, display_name, avatar_id").
 		Where("id <> ? AND pilot_number > ?", requesterID, afterPilotNumber).
 		Where("channel_number > 0 AND channel_number = (SELECT channel_number FROM users WHERE id = ?)", requesterID)
 	if query != "" {

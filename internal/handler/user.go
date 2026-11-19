@@ -22,6 +22,7 @@ func NewUserHandler(auth *service.AuthService) *UserHandler {
 type updateProfileRequest struct {
 	DisplayName   *string `json:"display_name"`
 	ChannelNumber *int    `json:"channel_number"`
+	AvatarID      *int    `json:"avatar_id"`
 }
 
 type changePasswordRequest struct {
@@ -82,13 +83,17 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	}
 	var request updateProfileRequest
 	if err := c.ShouldBindJSON(&request); err != nil ||
-		(request.DisplayName == nil && request.ChannelNumber == nil) {
+		(request.DisplayName == nil && request.ChannelNumber == nil && request.AvatarID == nil) {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if request.ChannelNumber != nil &&
 		(*request.ChannelNumber < 0 || *request.ChannelNumber > 999999) {
 		respondError(c, http.StatusBadRequest, "invalid channel number")
+		return
+	}
+	if request.AvatarID != nil && !service.IsValidAvatarID(*request.AvatarID) {
+		respondError(c, http.StatusBadRequest, "invalid avatar")
 		return
 	}
 	var user *model.User
@@ -99,12 +104,17 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	if err == nil && request.ChannelNumber != nil {
 		user, err = h.auth.UpdateChannelNumber(c.Request.Context(), userID, *request.ChannelNumber)
 	}
+	if err == nil && request.AvatarID != nil {
+		user, err = h.auth.UpdateAvatarID(c.Request.Context(), userID, *request.AvatarID)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidDisplayName):
 			respondError(c, http.StatusBadRequest, "invalid display name")
 		case errors.Is(err, service.ErrInvalidChannelNumber):
 			respondError(c, http.StatusBadRequest, "invalid channel number")
+		case errors.Is(err, service.ErrInvalidAvatarID):
+			respondError(c, http.StatusBadRequest, "invalid avatar")
 		case errors.Is(err, service.ErrNotFound):
 			respondError(c, http.StatusNotFound, "user not found")
 		default:
@@ -112,7 +122,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.Email, user.CreatedAt)})
 }
 
 func (h *UserHandler) Profile(c *gin.Context) {
@@ -135,5 +145,5 @@ func (h *UserHandler) Profile(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.Email, user.CreatedAt)})
 }

@@ -48,6 +48,13 @@ func (r *profileTestUsers) ChangePassword(_ context.Context, id uuid.UUID, expec
 	r.sessionsRevoked = true
 	return nil
 }
+func (r *profileTestUsers) UpdateAvatarID(_ context.Context, id uuid.UUID, avatarID int) error {
+	if r.user == nil || r.user.ID != id {
+		return service.ErrNotFound
+	}
+	r.user.AvatarID = avatarID
+	return nil
+}
 func (r *profileTestUsers) UpdateChannelNumber(_ context.Context, id uuid.UUID, channelNumber int) error {
 	if r.user == nil || r.user.ID != id {
 		return service.ErrNotFound
@@ -145,6 +152,45 @@ func TestUpdateProfileChannelNumber(t *testing.T) {
 	engine.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || users.user.ChannelNumber != 0 {
 		t.Fatalf("clearing channel response = %d, stored=%d", response.Code, users.user.ChannelNumber)
+	}
+}
+
+func TestUpdateProfileAvatarID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID := uuid.New()
+	users := &profileTestUsers{user: &model.User{ID: userID, Username: "pilot_one"}}
+	handler := NewUserHandler(service.NewAuthService(users, nil))
+	engine := gin.New()
+	engine.PATCH("/profile", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.UpdateProfile(c)
+	})
+
+	request := httptest.NewRequest(http.MethodPatch, "/profile", strings.NewReader(`{"avatar_id":5}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || users.user.AvatarID != 5 {
+		t.Fatalf("avatar update response = %d %s; stored avatar=%d", response.Code, response.Body.String(), users.user.AvatarID)
+	}
+	var body struct {
+		User struct {
+			AvatarID int `json:"avatar_id"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode profile response: %v", err)
+	}
+	if body.User.AvatarID != 5 {
+		t.Fatalf("response avatar id = %d, want 5", body.User.AvatarID)
+	}
+
+	request = httptest.NewRequest(http.MethodPatch, "/profile", strings.NewReader(`{"avatar_id":999}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || users.user.AvatarID != 5 {
+		t.Fatalf("invalid avatar response = %d; stored avatar=%d", response.Code, users.user.AvatarID)
 	}
 }
 

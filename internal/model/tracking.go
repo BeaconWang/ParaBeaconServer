@@ -22,6 +22,7 @@ type PublicPilotLocation struct {
 	LiveRoomID    *uuid.UUID              `gorm:"-" json:"live_room_id,omitempty"`
 	PilotNumber   int                     `gorm:"column:pilot_number" json:"pilot_number"`
 	ChannelNumber int                     `gorm:"column:channel_number" json:"channel_number"`
+	AvatarID      int                     `gorm:"column:avatar_id" json:"avatar_id"`
 	PilotName     string                  `gorm:"column:public_pilot_name" json:"pilot_name"`
 	Latitude      float64                 `gorm:"column:latitude" json:"lat"`
 	Longitude     float64                 `gorm:"column:longitude" json:"lon"`

@@ -12,6 +12,7 @@ type User struct {
 	Username      string    `gorm:"size:32;not null;uniqueIndex" json:"username"`
 	DisplayName   string    `gorm:"size:48;not null;default:''" json:"display_name"`
 	ChannelNumber int       `gorm:"not null;default:0;index:idx_users_channel_number" json:"channel_number"`
+	AvatarID      int       `gorm:"not null;default:0" json:"avatar_id"`
 	Email         *string   `gorm:"size:254;uniqueIndex" json:"email,omitempty"`
 	PilotNumber   *int      `gorm:"-:migration" json:"-"`
 	PasswordHash  string    `gorm:"size:255;not null" json:"-"`

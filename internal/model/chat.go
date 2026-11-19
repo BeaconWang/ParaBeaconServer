@@ -13,6 +13,7 @@ type ChatMessage struct {
 	SenderID             uuid.UUID  `gorm:"type:uuid;not null;index:idx_chat_sender_created,priority:1" json:"-"`
 	SenderPilotNumber    int        `gorm:"not null;index:idx_chat_sender_created,priority:2" json:"sender_pilot_number"`
 	SenderName           string     `gorm:"size:32;not null" json:"sender_name"`
+	SenderAvatarID       int        `gorm:"not null;default:0" json:"sender_avatar_id"`
 	RecipientID          *uuid.UUID `gorm:"type:uuid;index:idx_chat_recipient_created,priority:1" json:"-"`
 	RecipientPilotNumber *int       `gorm:"index:idx_chat_recipient_created,priority:2" json:"recipient_pilot_number,omitempty"`
 	Text                 string     `gorm:"type:text;not null" json:"text"`

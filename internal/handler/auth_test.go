@@ -51,6 +51,14 @@ func (r *authTestUsers) FindByID(_ context.Context, id uuid.UUID) (*model.User, 
 	return nil, gorm.ErrRecordNotFound
 }
 
+func (r *authTestUsers) UpdateAvatarID(_ context.Context, id uuid.UUID, avatarID int) error {
+	if r.user.ID != id {
+		return gorm.ErrRecordNotFound
+	}
+	r.user.AvatarID = avatarID
+	return nil
+}
+
 func (r *authTestUsers) UpdateChannelNumber(_ context.Context, id uuid.UUID, channelNumber int) error {
 	if r.user.ID != id {
 		return gorm.ErrRecordNotFound
@@ -171,5 +179,9 @@ func TestRegisterRequiresOnlyUsernameAndPassword(t *testing.T) {
 	}
 	if channelNumber != 0 {
 		t.Fatalf("new-account channel number = %d, want 0 (unassigned)", channelNumber)
+	}
+	var avatarID int
+	if err := json.Unmarshal(response.User["avatar_id"], &avatarID); err != nil || avatarID != 0 {
+		t.Fatalf("new-account avatar id = %d, err=%v; want default 0", avatarID, err)
 	}
 }

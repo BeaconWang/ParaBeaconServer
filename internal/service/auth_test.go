@@ -79,6 +79,15 @@ func (r *memoryUsers) ChangePassword(_ context.Context, id uuid.UUID, expectedHa
 	return nil
 }
 
+func (r *memoryUsers) UpdateAvatarID(_ context.Context, id uuid.UUID, avatarID int) error {
+	user, ok := r.byID[id]
+	if !ok {
+		return gorm.ErrRecordNotFound
+	}
+	user.AvatarID = avatarID
+	return nil
+}
+
 func (r *memoryUsers) UpdateChannelNumber(_ context.Context, id uuid.UUID, channelNumber int) error {
 	user, ok := r.byID[id]
 	if !ok {
@@ -119,6 +128,24 @@ func TestAuthServiceUpdatesChannelNumber(t *testing.T) {
 	for _, invalid := range []int{-1, 1000000} {
 		if _, err := service.UpdateChannelNumber(context.Background(), user.ID, invalid); !errors.Is(err, ErrInvalidChannelNumber) {
 			t.Errorf("UpdateChannelNumber(%d) error = %v, want ErrInvalidChannelNumber", invalid, err)
+		}
+	}
+}
+
+func TestAuthServiceUpdatesAvatarFromAllowList(t *testing.T) {
+	repo := newMemoryUsers()
+	service := NewAuthService(repo, utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute))
+	user, err := service.Register(context.Background(), "avatar_pilot", "", "abc123")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	updated, err := service.UpdateAvatarID(context.Background(), user.ID, 5)
+	if err != nil || updated.AvatarID != 5 || repo.byID[user.ID].AvatarID != 5 {
+		t.Fatalf("UpdateAvatarID() = %#v, err=%v", updated, err)
+	}
+	for _, invalid := range []int{-1, MaxAvatarID + 1} {
+		if _, err := service.UpdateAvatarID(context.Background(), user.ID, invalid); !errors.Is(err, ErrInvalidAvatarID) {
+			t.Errorf("UpdateAvatarID(%d) error = %v, want ErrInvalidAvatarID", invalid, err)
 		}
 	}
 }

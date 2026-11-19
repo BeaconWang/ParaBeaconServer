@@ -25,6 +25,7 @@ var (
 	ErrConflict                  = errors.New("username or email already exists")
 	ErrInvalidDisplayName        = errors.New("invalid display name")
 	ErrInvalidChannelNumber      = errors.New("invalid channel number")
+	ErrInvalidAvatarID           = errors.New("invalid avatar id")
 	ErrInvalidCredentials        = errors.New("invalid email or password")
 	ErrInvalidCurrentPassword    = errors.New("invalid current password")
 	ErrPasswordUnchanged         = errors.New("new password must differ from current password")
@@ -35,7 +36,14 @@ var (
 	usernamePattern              = regexp.MustCompile(`^[a-zA-Z0-9_]{3,32}$`)
 )
 
-const MinPasswordCharacters = 6
+const (
+	MinPasswordCharacters = 6
+	MaxAvatarID           = 7
+)
+
+func IsValidAvatarID(avatarID int) bool {
+	return avatarID >= 0 && avatarID <= MaxAvatarID
+}
 
 type AuthService struct {
 	users         repository.UserRepository
@@ -107,6 +115,24 @@ func (s *AuthService) UpdateChannelNumber(ctx context.Context, userID uuid.UUID,
 		return nil, err
 	}
 	user.ChannelNumber = channelNumber
+	return user, nil
+}
+
+func (s *AuthService) UpdateAvatarID(ctx context.Context, userID uuid.UUID, avatarID int) (*model.User, error) {
+	if userID == uuid.Nil {
+		return nil, ErrNotFound
+	}
+	if !IsValidAvatarID(avatarID) {
+		return nil, ErrInvalidAvatarID
+	}
+	user, err := s.Profile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.users.UpdateAvatarID(ctx, userID, avatarID); err != nil {
+		return nil, err
+	}
+	user.AvatarID = avatarID
 	return user, nil
 }
 
