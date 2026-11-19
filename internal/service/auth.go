@@ -24,6 +24,7 @@ import (
 var (
 	ErrConflict                  = errors.New("username or email already exists")
 	ErrInvalidDisplayName        = errors.New("invalid display name")
+	ErrInvalidChannelNumber      = errors.New("invalid channel number")
 	ErrInvalidCredentials        = errors.New("invalid email or password")
 	ErrInvalidCurrentPassword    = errors.New("invalid current password")
 	ErrPasswordUnchanged         = errors.New("new password must differ from current password")
@@ -88,6 +89,24 @@ func (s *AuthService) Register(ctx context.Context, username, email, password st
 		}
 		return nil, err
 	}
+	return user, nil
+}
+
+func (s *AuthService) UpdateChannelNumber(ctx context.Context, userID uuid.UUID, channelNumber int) (*model.User, error) {
+	if userID == uuid.Nil {
+		return nil, ErrNotFound
+	}
+	if channelNumber < 0 || channelNumber > 999999 {
+		return nil, ErrInvalidChannelNumber
+	}
+	user, err := s.Profile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.users.UpdateChannelNumber(ctx, userID, channelNumber); err != nil {
+		return nil, err
+	}
+	user.ChannelNumber = channelNumber
 	return user, nil
 }
 

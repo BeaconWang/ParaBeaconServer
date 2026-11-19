@@ -423,8 +423,15 @@ func (c *chatClient) subscribe(incoming chatClientMessage) {
 		c.hub.mu.Unlock()
 		c.enqueueJSON(chatServerMessage{Type: "subscribed", Scope: service.ChatScopePublic})
 	case service.ChatScopeChannel:
-		if incoming.ChannelNumber < 0 || incoming.ChannelNumber > 999999 || incoming.PilotNumber != 0 {
+		ctx, cancel := context.WithTimeout(c.hub.ctx, 5*time.Second)
+		err := c.hub.chat.ValidateChannel(ctx, c.userID, incoming.ChannelNumber)
+		cancel()
+		if incoming.PilotNumber != 0 {
 			c.sendError("invalid_subscription")
+			return
+		}
+		if err != nil {
+			c.sendError(chatErrorCode(err))
 			return
 		}
 		c.hub.mu.Lock()

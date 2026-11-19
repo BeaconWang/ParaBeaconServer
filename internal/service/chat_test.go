@@ -42,8 +42,12 @@ func (r *memoryChatRepository) FindChatUserByPilotNumber(_ context.Context, numb
 func (r *memoryChatRepository) SearchChatAccounts(_ context.Context, requesterID uuid.UUID, query string, afterPilotNumber, limit int) ([]repository.ChatAccount, error) {
 	query = strings.ToLower(query)
 	accounts := make([]repository.ChatAccount, 0)
+	requester := r.users[requesterID]
 	for id, user := range r.users {
-		if id == requesterID || user.PilotNumber <= afterPilotNumber {
+		if requester.ChannelNumber == 0 ||
+			id == requesterID ||
+			user.ChannelNumber != requester.ChannelNumber ||
+			user.PilotNumber <= afterPilotNumber {
 			continue
 		}
 		if query != "" &&
@@ -114,12 +118,13 @@ func (r *memoryChatRepository) list(matches func(model.ChatMessage) bool, before
 }
 
 func TestSearchAccountsFindsUsernameAndDisplayNameAndPages(t *testing.T) {
-	requesterID, aliceID, bobID, carolID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	requesterID, aliceID, bobID, carolID, otherChannelID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
-		requesterID: {ID: requesterID, PilotNumber: 100001, Username: "my_account", DisplayName: "My Name"},
-		aliceID:     {ID: aliceID, PilotNumber: 100002, Username: "ridge_runner", DisplayName: "Alice Summit"},
-		bobID:       {ID: bobID, PilotNumber: 100003, Username: "bob_wings", DisplayName: "Robert Cloud"},
-		carolID:     {ID: carolID, PilotNumber: 100004, Username: "carol", DisplayName: "Alice Ridge"},
+		requesterID:    {ID: requesterID, PilotNumber: 100001, ChannelNumber: 456789, Username: "my_account", DisplayName: "My Name"},
+		aliceID:        {ID: aliceID, PilotNumber: 100002, ChannelNumber: 456789, Username: "ridge_runner", DisplayName: "Alice Summit"},
+		bobID:          {ID: bobID, PilotNumber: 100003, ChannelNumber: 456789, Username: "bob_wings", DisplayName: "Robert Cloud"},
+		carolID:        {ID: carolID, PilotNumber: 100004, ChannelNumber: 456789, Username: "carol", DisplayName: "Alice Ridge"},
+		otherChannelID: {ID: otherChannelID, PilotNumber: 100005, ChannelNumber: 456780, Username: "alice_other", DisplayName: "Alice Other"},
 	}}
 	chat := NewChatService(repository)
 
@@ -181,12 +186,38 @@ func TestSearchAccountsRejectsInvalidQueriesAndPaging(t *testing.T) {
 	}
 }
 
+func TestChannelAccessRequiresSameNonzeroAssignedFrequency(t *testing.T) {
+	requesterID, sameChannelID, otherChannelID := uuid.New(), uuid.New(), uuid.New()
+	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
+		requesterID:    {ID: requesterID, PilotNumber: 123456, ChannelNumber: 765432, Username: "requester"},
+		sameChannelID:  {ID: sameChannelID, PilotNumber: 234567, ChannelNumber: 765432, Username: "same_frequency"},
+		otherChannelID: {ID: otherChannelID, PilotNumber: 345678, ChannelNumber: 765433, Username: "other_frequency"},
+	}}
+	chat := NewChatService(repository)
+
+	if err := chat.ValidateChannel(context.Background(), requesterID, 765432); err != nil {
+		t.Fatalf("validate assigned frequency: %v", err)
+	}
+	for _, channelNumber := range []int{0, 765433} {
+		if err := chat.ValidateChannel(context.Background(), requesterID, channelNumber); !errors.Is(err, ErrInvalidChatRequest) {
+			t.Errorf("ValidateChannel(%d) error = %v, want invalid request", channelNumber, err)
+		}
+	}
+	peerID, err := chat.SubscribePeer(context.Background(), requesterID, 234567)
+	if err != nil || peerID != sameChannelID {
+		t.Fatalf("same-frequency private peer = %s, err=%v", peerID, err)
+	}
+	if _, err := chat.SubscribePeer(context.Background(), requesterID, 345678); !errors.Is(err, ErrInvalidChatRequest) {
+		t.Fatalf("cross-frequency private peer error = %v, want invalid request", err)
+	}
+}
+
 func TestPublicLocationStatusOnlyReportsFreshPublicPartnerLocation(t *testing.T) {
 	requesterID, partnerID := uuid.New(), uuid.New()
 	repository := &memoryChatRepository{
 		users: map[uuid.UUID]repository.ChatUser{
-			requesterID: {ID: requesterID, PilotNumber: 123456, Username: "requester"},
-			partnerID:   {ID: partnerID, PilotNumber: 234567, Username: "partner"},
+			requesterID: {ID: requesterID, PilotNumber: 123456, ChannelNumber: 111111, Username: "requester"},
+			partnerID:   {ID: partnerID, PilotNumber: 234567, ChannelNumber: 111111, Username: "partner"},
 		},
 		locationStatus: map[int]bool{234567: true},
 	}
@@ -214,9 +245,9 @@ func TestChatRoutesPublicChannelAndDirectMessages(t *testing.T) {
 	aliceID, bobID, carolID := uuid.New(), uuid.New(), uuid.New()
 	channelNumber := 345678
 	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
-		aliceID: {ID: aliceID, PilotNumber: 123456, Username: "alice", DisplayName: "Alice Ridge"},
-		bobID:   {ID: bobID, PilotNumber: 234567, Username: "bob"},
-		carolID: {ID: carolID, PilotNumber: 345678, Username: "carol"},
+		aliceID: {ID: aliceID, PilotNumber: 123456, ChannelNumber: channelNumber, Username: "alice", DisplayName: "Alice Ridge"},
+		bobID:   {ID: bobID, PilotNumber: 234567, ChannelNumber: channelNumber, Username: "bob"},
+		carolID: {ID: carolID, PilotNumber: 345678, ChannelNumber: channelNumber, Username: "carol"},
 	}}
 	chat := NewChatService(repository)
 
@@ -272,13 +303,15 @@ func TestChatValidatesChannelsRecipientsAndText(t *testing.T) {
 	ctx := context.Background()
 	aliceID, bobID := uuid.New(), uuid.New()
 	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
-		aliceID: {ID: aliceID, PilotNumber: 123456, Username: "alice"},
-		bobID:   {ID: bobID, PilotNumber: 234567, Username: "bob"},
+		aliceID: {ID: aliceID, PilotNumber: 123456, ChannelNumber: 345678, Username: "alice"},
+		bobID:   {ID: bobID, PilotNumber: 234567, ChannelNumber: 456789, Username: "bob"},
 	}}
 	chat := NewChatService(repository)
 	for _, request := range []SendChatRequest{
 		{Scope: "unknown", Text: "hello"},
 		{Scope: ChatScopeChannel, ChannelNumber: 1000000, Text: "hello"},
+		{Scope: ChatScopeChannel, ChannelNumber: 0, Text: "no channel"},
+		{Scope: ChatScopeChannel, ChannelNumber: 345679, Text: "different channel"},
 		{Scope: ChatScopeDirect, PilotNumber: 99999, Text: "hello"},
 		{Scope: ChatScopeDirect, PilotNumber: 123456, Text: "self"},
 		{Scope: ChatScopePublic, Text: string(make([]byte, 0))},
@@ -288,20 +321,29 @@ func TestChatValidatesChannelsRecipientsAndText(t *testing.T) {
 			t.Errorf("Send(%#v) error = %v, want invalid request", request, err)
 		}
 	}
+	if _, err := chat.Send(ctx, aliceID, SendChatRequest{Scope: ChatScopeDirect, PilotNumber: 234567, Text: "different frequency"}); !errors.Is(err, ErrInvalidChatRequest) {
+		t.Fatalf("cross-channel direct message error = %v, want invalid request", err)
+	}
 	if _, err := chat.Send(ctx, aliceID, SendChatRequest{Scope: ChatScopeDirect, PilotNumber: 999998, Text: "unknown pilot"}); !errors.Is(err, ErrChatUserNotFound) {
 		t.Fatalf("missing recipient error = %v, want not found", err)
 	}
 }
 
-func TestChatAllowsChannel000000AndRateLimitsSender(t *testing.T) {
+func TestChatRejectsChannelZeroAndRateLimitsSender(t *testing.T) {
 	ctx := context.Background()
 	pilotID := uuid.New()
 	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
-		pilotID: {ID: pilotID, PilotNumber: 123456, Username: "pilot"},
+		pilotID: {ID: pilotID, PilotNumber: 123456, ChannelNumber: 987654, Username: "pilot"},
 	}}
 	chat := NewChatService(repository)
-	if _, err := chat.Send(ctx, pilotID, SendChatRequest{Scope: ChatScopeChannel, ChannelNumber: 0, Text: "all channel"}); err != nil {
-		t.Fatalf("send channel 000000: %v", err)
+	if _, err := chat.Send(ctx, pilotID, SendChatRequest{Scope: ChatScopeChannel, ChannelNumber: 0, Text: "no frequency"}); !errors.Is(err, ErrInvalidChatRequest) {
+		t.Fatalf("send channel zero error = %v, want invalid request", err)
+	}
+	if _, err := chat.Send(ctx, pilotID, SendChatRequest{Scope: ChatScopeChannel, ChannelNumber: 987653, Text: "wrong frequency"}); !errors.Is(err, ErrInvalidChatRequest) {
+		t.Fatalf("send other channel error = %v, want invalid request", err)
+	}
+	if _, err := chat.Send(ctx, pilotID, SendChatRequest{Scope: ChatScopeChannel, ChannelNumber: 987654, Text: "on frequency"}); err != nil {
+		t.Fatalf("send assigned channel: %v", err)
 	}
 	if _, err := chat.Send(ctx, pilotID, SendChatRequest{Scope: ChatScopePublic, Text: "too fast"}); !errors.Is(err, ErrChatRateLimited) {
 		t.Fatalf("rapid send error = %v, want rate limited", err)

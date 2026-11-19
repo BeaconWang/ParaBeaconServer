@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/middleware"
+	"github.com/parabeacon/server/internal/model"
 	"github.com/parabeacon/server/internal/service"
 )
 
@@ -19,7 +20,8 @@ func NewUserHandler(auth *service.AuthService) *UserHandler {
 }
 
 type updateProfileRequest struct {
-	DisplayName *string `json:"display_name"`
+	DisplayName   *string `json:"display_name"`
+	ChannelNumber *int    `json:"channel_number"`
 }
 
 type changePasswordRequest struct {
@@ -79,15 +81,30 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 	var request updateProfileRequest
-	if err := c.ShouldBindJSON(&request); err != nil || request.DisplayName == nil {
+	if err := c.ShouldBindJSON(&request); err != nil ||
+		(request.DisplayName == nil && request.ChannelNumber == nil) {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	user, err := h.auth.UpdateDisplayName(c.Request.Context(), userID, *request.DisplayName)
+	if request.ChannelNumber != nil &&
+		(*request.ChannelNumber < 0 || *request.ChannelNumber > 999999) {
+		respondError(c, http.StatusBadRequest, "invalid channel number")
+		return
+	}
+	var user *model.User
+	var err error
+	if request.DisplayName != nil {
+		user, err = h.auth.UpdateDisplayName(c.Request.Context(), userID, *request.DisplayName)
+	}
+	if err == nil && request.ChannelNumber != nil {
+		user, err = h.auth.UpdateChannelNumber(c.Request.Context(), userID, *request.ChannelNumber)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidDisplayName):
 			respondError(c, http.StatusBadRequest, "invalid display name")
+		case errors.Is(err, service.ErrInvalidChannelNumber):
+			respondError(c, http.StatusBadRequest, "invalid channel number")
 		case errors.Is(err, service.ErrNotFound):
 			respondError(c, http.StatusNotFound, "user not found")
 		default:
@@ -95,7 +112,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.Email, user.CreatedAt)})
 }
 
 func (h *UserHandler) Profile(c *gin.Context) {
@@ -118,5 +135,5 @@ func (h *UserHandler) Profile(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.Email, user.CreatedAt)})
 }

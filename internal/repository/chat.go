@@ -13,10 +13,11 @@ import (
 const ChatPageSize = 50
 
 type ChatUser struct {
-	ID          uuid.UUID
-	PilotNumber int
-	Username    string
-	DisplayName string
+	ID            uuid.UUID
+	PilotNumber   int
+	ChannelNumber int
+	Username      string
+	DisplayName   string
 }
 
 type ChatAccount struct {
@@ -48,7 +49,7 @@ func (r *GormChatRepository) FindChatUserByID(ctx context.Context, id uuid.UUID)
 	var user ChatUser
 	if err := r.db.WithContext(ctx).
 		Table("users").
-		Select("id, pilot_number, username, display_name").
+		Select("id, pilot_number, channel_number, username, display_name").
 		Where("id = ?", id).
 		Take(&user).Error; err != nil {
 		return nil, fmt.Errorf("find chat user: %w", err)
@@ -60,7 +61,7 @@ func (r *GormChatRepository) FindChatUserByPilotNumber(ctx context.Context, numb
 	var user ChatUser
 	if err := r.db.WithContext(ctx).
 		Table("users").
-		Select("id, pilot_number, username").
+		Select("id, pilot_number, channel_number, username").
 		Where("pilot_number = ?", number).
 		Take(&user).Error; err != nil {
 		return nil, fmt.Errorf("find chat pilot: %w", err)
@@ -73,7 +74,8 @@ func (r *GormChatRepository) SearchChatAccounts(ctx context.Context, requesterID
 	databaseQuery := r.db.WithContext(ctx).
 		Table("users").
 		Select("pilot_number, username, display_name").
-		Where("id <> ? AND pilot_number > ?", requesterID, afterPilotNumber)
+		Where("id <> ? AND pilot_number > ?", requesterID, afterPilotNumber).
+		Where("channel_number > 0 AND channel_number = (SELECT channel_number FROM users WHERE id = ?)", requesterID)
 	if query != "" {
 		databaseQuery = databaseQuery.Where(
 			"POSITION(LOWER(?) IN LOWER(username)) > 0 OR POSITION(LOWER(?) IN LOWER(display_name)) > 0",

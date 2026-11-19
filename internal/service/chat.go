@@ -123,7 +123,7 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 			return ChatMessage{}, ErrInvalidChatRequest
 		}
 	case ChatScopeChannel:
-		if request.ChannelNumber < 0 || request.ChannelNumber > 999999 || request.PilotNumber != 0 {
+		if request.ChannelNumber < 1 || request.ChannelNumber > 999999 || request.PilotNumber != 0 || sender.ChannelNumber != request.ChannelNumber {
 			return ChatMessage{}, ErrInvalidChatRequest
 		}
 		channel := request.ChannelNumber
@@ -141,6 +141,9 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 		}
 		if err != nil {
 			return ChatMessage{}, err
+		}
+		if sender.ChannelNumber == 0 || recipient.ChannelNumber != sender.ChannelNumber {
+			return ChatMessage{}, ErrInvalidChatRequest
 		}
 		message.RecipientID = &recipient.ID
 		message.RecipientPilotNumber = &recipient.PilotNumber
@@ -212,9 +215,30 @@ func (s *ChatService) SearchAccounts(ctx context.Context, requesterID uuid.UUID,
 	return page, nil
 }
 
+func (s *ChatService) ValidateChannel(ctx context.Context, userID uuid.UUID, channelNumber int) error {
+	if userID == uuid.Nil || channelNumber < 1 || channelNumber > 999999 {
+		return ErrInvalidChatRequest
+	}
+	user, err := s.repository.FindChatUserByID(ctx, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrChatUserNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if user.ChannelNumber != channelNumber {
+		return ErrInvalidChatRequest
+	}
+	return nil
+}
+
 func (s *ChatService) PublicLocationStatus(ctx context.Context, requesterID uuid.UUID, pilotNumber int) (bool, error) {
 	if requesterID == uuid.Nil || pilotNumber < 100000 || pilotNumber > 999999 {
 		return false, ErrInvalidChatRequest
+	}
+	requester, err := s.repository.FindChatUserByID(ctx, requesterID)
+	if err != nil {
+		return false, err
 	}
 	pilot, err := s.repository.FindChatUserByPilotNumber(ctx, pilotNumber)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -223,7 +247,7 @@ func (s *ChatService) PublicLocationStatus(ctx context.Context, requesterID uuid
 	if err != nil {
 		return false, err
 	}
-	if pilot.ID == requesterID {
+	if requester.ChannelNumber == 0 || pilot.ChannelNumber != requester.ChannelNumber || pilot.ID == requesterID {
 		return false, nil
 	}
 	now := time.Now().UTC()
@@ -239,14 +263,24 @@ func (s *ChatService) SubscribePeer(ctx context.Context, userID uuid.UUID, numbe
 	if userID == uuid.Nil || number < 100000 || number > 999999 {
 		return uuid.Nil, ErrInvalidChatRequest
 	}
-	peerID, err := s.ResolvePilot(ctx, number)
+	requester, err := s.repository.FindChatUserByID(ctx, userID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return uuid.Nil, ErrChatUserNotFound
+	}
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if peerID == userID {
+	peer, err := s.repository.FindChatUserByPilotNumber(ctx, number)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return uuid.Nil, ErrChatUserNotFound
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if peer.ID == userID || requester.ChannelNumber == 0 || peer.ChannelNumber != requester.ChannelNumber {
 		return uuid.Nil, ErrInvalidChatRequest
 	}
-	return peerID, nil
+	return peer.ID, nil
 }
 
 func (s *ChatService) History(ctx context.Context, userID uuid.UUID, scope string, channelNumber, peerNumber int, rawCursor string) (ChatPage, error) {
@@ -266,8 +300,11 @@ func (s *ChatService) History(ctx context.Context, userID uuid.UUID, scope strin
 		}
 		rows, err = s.repository.ListPublicChat(ctx, before.CreatedAt, before.ID, queryLimit)
 	case ChatScopeChannel:
-		if channelNumber < 0 || channelNumber > 999999 || peerNumber != 0 {
+		if peerNumber != 0 {
 			return ChatPage{}, ErrInvalidChatRequest
+		}
+		if err := s.ValidateChannel(ctx, userID, channelNumber); err != nil {
+			return ChatPage{}, err
 		}
 		rows, err = s.repository.ListChannelChat(ctx, channelNumber, before.CreatedAt, before.ID, queryLimit)
 	case ChatScopeDirect:

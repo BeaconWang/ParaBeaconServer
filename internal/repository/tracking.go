@@ -111,14 +111,18 @@ func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID
 	locations := make([]model.PublicPilotLocation, 0, limit)
 	query := r.db.WithContext(ctx).
 		Table("live_track_sessions AS s").
-		Select("s.id AS session_id, s.pilot_name, COALESCE(NULLIF(BTRIM(u.display_name), ''), u.username) AS public_pilot_name, u.pilot_number, latest.latitude, latest.longitude, latest.altitude, latest.ground_speed, latest.vertical_speed, latest.heading, latest.timestamp AS observed_at").
+		Select("s.id AS session_id, s.pilot_name, COALESCE(NULLIF(BTRIM(u.display_name), ''), u.username) AS public_pilot_name, u.pilot_number, u.channel_number, latest.latitude, latest.longitude, latest.altitude, latest.ground_speed, latest.vertical_speed, latest.heading, latest.timestamp AS observed_at").
 		Joins("JOIN users AS u ON u.id = s.user_id").
 		Joins("JOIN LATERAL (SELECT p.latitude, p.longitude, p.altitude, p.ground_speed, p.vertical_speed, p.heading, p.timestamp FROM live_track_points p WHERE p.session_id = s.id ORDER BY p.timestamp DESC LIMIT 1) AS latest ON TRUE").
 		Where("s.ended_at IS NULL AND s.publicly_share = ?", true).
 		Where("latest.timestamp >= ? AND latest.timestamp <= ?", observedSince, observedUntil).
 		Where("latest.latitude BETWEEN ? AND ?", south, north)
 	if userID != uuid.Nil {
-		query = query.Where("s.user_id <> ?", userID)
+		query = query.
+			Where("s.user_id <> ?", userID).
+			Where("u.channel_number > 0 AND u.channel_number = (SELECT channel_number FROM users WHERE id = ?)", userID)
+	} else {
+		query = query.Where("1 = 0")
 	}
 	if west <= east {
 		query = query.Where("latest.longitude BETWEEN ? AND ?", west, east)

@@ -79,6 +79,15 @@ func (r *memoryUsers) ChangePassword(_ context.Context, id uuid.UUID, expectedHa
 	return nil
 }
 
+func (r *memoryUsers) UpdateChannelNumber(_ context.Context, id uuid.UUID, channelNumber int) error {
+	user, ok := r.byID[id]
+	if !ok {
+		return gorm.ErrRecordNotFound
+	}
+	user.ChannelNumber = channelNumber
+	return nil
+}
+
 func (r *memoryUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, displayName string) error {
 	user, ok := r.byID[id]
 	if !ok {
@@ -86,6 +95,32 @@ func (r *memoryUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, display
 	}
 	user.DisplayName = displayName
 	return nil
+}
+
+func TestAuthServiceUpdatesChannelNumber(t *testing.T) {
+	repo := newMemoryUsers()
+	service := NewAuthService(repo, utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute))
+	user, err := service.Register(context.Background(), "frequency_pilot", "", "abc123")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	updated, err := service.UpdateChannelNumber(context.Background(), user.ID, 123456)
+	if err != nil {
+		t.Fatalf("UpdateChannelNumber() error = %v", err)
+	}
+	if updated.ChannelNumber != 123456 || repo.byID[user.ID].ChannelNumber != 123456 {
+		t.Fatalf("channel number was not saved: updated=%d stored=%d", updated.ChannelNumber, repo.byID[user.ID].ChannelNumber)
+	}
+	updated, err = service.UpdateChannelNumber(context.Background(), user.ID, 0)
+	if err != nil || updated.ChannelNumber != 0 {
+		t.Fatalf("clear channel number = %#v, err=%v", updated, err)
+	}
+	for _, invalid := range []int{-1, 1000000} {
+		if _, err := service.UpdateChannelNumber(context.Background(), user.ID, invalid); !errors.Is(err, ErrInvalidChannelNumber) {
+			t.Errorf("UpdateChannelNumber(%d) error = %v, want ErrInvalidChannelNumber", invalid, err)
+		}
+	}
 }
 
 func TestAuthServiceUpdatesDisplayNameWithValidation(t *testing.T) {

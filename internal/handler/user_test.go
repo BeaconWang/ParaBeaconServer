@@ -48,6 +48,13 @@ func (r *profileTestUsers) ChangePassword(_ context.Context, id uuid.UUID, expec
 	r.sessionsRevoked = true
 	return nil
 }
+func (r *profileTestUsers) UpdateChannelNumber(_ context.Context, id uuid.UUID, channelNumber int) error {
+	if r.user == nil || r.user.ID != id {
+		return service.ErrNotFound
+	}
+	r.user.ChannelNumber = channelNumber
+	return nil
+}
 func (r *profileTestUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, displayName string) error {
 	if r.user == nil || r.user.ID != id {
 		return service.ErrNotFound
@@ -89,6 +96,55 @@ func TestUpdateProfileDisplayNameRequiresAuthenticatedOwner(t *testing.T) {
 	}
 	if responseBody.User.DisplayName != "New Pilot" {
 		t.Fatalf("response display name = %q", responseBody.User.DisplayName)
+	}
+}
+
+func TestUpdateProfileChannelNumber(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID := uuid.New()
+	users := &profileTestUsers{user: &model.User{
+		ID: userID, Username: "pilot_one", ChannelNumber: 0,
+	}}
+	handler := NewUserHandler(service.NewAuthService(users, nil))
+	engine := gin.New()
+	engine.PATCH("/profile", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.UpdateProfile(c)
+	})
+
+	request := httptest.NewRequest(http.MethodPatch, "/profile", strings.NewReader(`{"channel_number":456789}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || users.user.ChannelNumber != 456789 {
+		t.Fatalf("update channel response = %d %s, stored=%d", response.Code, response.Body.String(), users.user.ChannelNumber)
+	}
+	var responseBody struct {
+		User struct {
+			ChannelNumber int `json:"channel_number"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &responseBody); err != nil {
+		t.Fatalf("decode profile response: %v", err)
+	}
+	if responseBody.User.ChannelNumber != 456789 {
+		t.Fatalf("response channel number = %d", responseBody.User.ChannelNumber)
+	}
+
+	request = httptest.NewRequest(http.MethodPatch, "/profile", strings.NewReader(`{"channel_number":1000000}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest || users.user.ChannelNumber != 456789 {
+		t.Fatalf("invalid channel response = %d, stored=%d", response.Code, users.user.ChannelNumber)
+	}
+
+	request = httptest.NewRequest(http.MethodPatch, "/profile", strings.NewReader(`{"channel_number":0}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || users.user.ChannelNumber != 0 {
+		t.Fatalf("clearing channel response = %d, stored=%d", response.Code, users.user.ChannelNumber)
 	}
 }
 

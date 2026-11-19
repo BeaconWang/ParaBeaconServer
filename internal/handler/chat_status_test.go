@@ -19,6 +19,7 @@ import (
 
 type chatStatusTestRepository struct {
 	pilotID     uuid.UUID
+	requesterID uuid.UUID
 	sharing     bool
 	accounts    []repository.ChatAccount
 	searchQuery string
@@ -27,17 +28,20 @@ type chatStatusTestRepository struct {
 }
 
 func (r *chatStatusTestRepository) FindChatUserByID(_ context.Context, id uuid.UUID) (*repository.ChatUser, error) {
+	if id == r.requesterID {
+		return &repository.ChatUser{ID: id, PilotNumber: 123456, ChannelNumber: 678901, Username: "requester"}, nil
+	}
 	if id != r.pilotID {
 		return nil, gorm.ErrRecordNotFound
 	}
-	return &repository.ChatUser{ID: r.pilotID, PilotNumber: 234567, Username: "partner"}, nil
+	return &repository.ChatUser{ID: r.pilotID, PilotNumber: 234567, ChannelNumber: 678901, Username: "partner"}, nil
 }
 
 func (r *chatStatusTestRepository) FindChatUserByPilotNumber(_ context.Context, number int) (*repository.ChatUser, error) {
 	if number != 234567 {
 		return nil, gorm.ErrRecordNotFound
 	}
-	return &repository.ChatUser{ID: r.pilotID, PilotNumber: number, Username: "partner"}, nil
+	return &repository.ChatUser{ID: r.pilotID, PilotNumber: number, ChannelNumber: 678901, Username: "partner"}, nil
 }
 
 func (r *chatStatusTestRepository) SearchChatAccounts(_ context.Context, _ uuid.UUID, query string, after, limit int) ([]repository.ChatAccount, error) {
@@ -132,7 +136,7 @@ func TestPilotLocationStatusReturnsOnlyBooleanForAuthenticatedChatUser(t *testin
 	gin.SetMode(gin.TestMode)
 	requesterID := uuid.New()
 	partnerID := uuid.New()
-	repository := &chatStatusTestRepository{pilotID: partnerID, sharing: true}
+	repository := &chatStatusTestRepository{pilotID: partnerID, requesterID: requesterID, sharing: true}
 	handler := NewChatHandler(service.NewChatService(repository), nil)
 	engine := gin.New()
 	engine.GET("/chat/pilots/:pilot_number/location-status", func(c *gin.Context) {
@@ -178,7 +182,7 @@ func TestPilotLocationStatusReturnsOnlyBooleanForAuthenticatedChatUser(t *testin
 func TestPilotLocationStatusRequiresAuthenticationAndValidPilotNumber(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	requesterID := uuid.New()
-	repository := &chatStatusTestRepository{pilotID: uuid.New(), sharing: true}
+	repository := &chatStatusTestRepository{pilotID: uuid.New(), requesterID: requesterID, sharing: true}
 	handler := NewChatHandler(service.NewChatService(repository), nil)
 	engine := gin.New()
 	engine.GET("/chat/pilots/:pilot_number/location-status", func(c *gin.Context) {

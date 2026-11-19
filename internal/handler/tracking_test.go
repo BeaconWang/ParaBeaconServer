@@ -63,14 +63,15 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	sessionID := uuid.New()
 	service := &trackingHandlerTestService{
 		locations: []model.PublicPilotLocation{{
-			SessionID:   sessionID,
-			PilotNumber: 123456,
-			PilotName:   "Sky Rider",
-			Latitude:    47.1,
-			Longitude:   8.5,
-			Altitude:    1200,
-			GroundSpeed: 12,
-			ObservedAt:  time.Now().UTC(),
+			SessionID:     sessionID,
+			PilotNumber:   123456,
+			ChannelNumber: 456789,
+			PilotName:     "Sky Rider",
+			Latitude:      47.1,
+			Longitude:     8.5,
+			Altitude:      1200,
+			GroundSpeed:   12,
+			ObservedAt:    time.Now().UTC(),
 			Path: []model.PublicPilotTrackPoint{{
 				SessionID:   sessionID,
 				Latitude:    47.1,
@@ -122,7 +123,11 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	if publicPilotName != "Sky Rider" {
 		t.Fatalf("public pilot name = %q, want display name", publicPilotName)
 	}
-	for _, sharedField := range []string{"pilot_name", "pilot_number", "altitude", "speed", "path"} {
+	var publicChannelNumber int
+	if err := json.Unmarshal(locations[0]["channel_number"], &publicChannelNumber); err != nil || publicChannelNumber != 456789 {
+		t.Fatalf("public channel number = %d, err=%v", publicChannelNumber, err)
+	}
+	for _, sharedField := range []string{"pilot_name", "pilot_number", "channel_number", "altitude", "speed", "path"} {
 		if _, exists := locations[0][sharedField]; !exists {
 			t.Errorf("public location has no shared flight field %q", sharedField)
 		}
