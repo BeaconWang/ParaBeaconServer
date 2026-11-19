@@ -49,7 +49,7 @@ func (h *ProfileImageHandler) Upload(c *gin.Context) {
 		respondProfileImageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.Introduction, user.Gender, user.Birthday, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
 }
 
 func (h *ProfileImageHandler) Remove(c *gin.Context) {
@@ -63,7 +63,7 @@ func (h *ProfileImageHandler) Remove(c *gin.Context) {
 		respondProfileImageError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.Introduction, user.Gender, user.Birthday, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
 }
 
 func (h *ProfileImageHandler) Get(c *gin.Context) {

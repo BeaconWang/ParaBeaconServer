@@ -24,6 +24,9 @@ import (
 var (
 	ErrConflict                  = errors.New("username or email already exists")
 	ErrInvalidDisplayName        = errors.New("invalid display name")
+	ErrInvalidIntroduction       = errors.New("invalid introduction")
+	ErrInvalidGender             = errors.New("invalid gender")
+	ErrInvalidBirthday           = errors.New("invalid birthday")
 	ErrInvalidChannelNumber      = errors.New("invalid channel number")
 	ErrInvalidAvatarID           = errors.New("invalid avatar id")
 	ErrInvalidCredentials        = errors.New("invalid email or password")
@@ -39,7 +42,16 @@ var (
 const (
 	MinPasswordCharacters = 6
 	MaxAvatarID           = 7
+	MaxIntroductionRunes  = 200
 )
+
+var allowedProfileGenders = map[string]struct{}{
+	"":                  {},
+	"male":              {},
+	"female":            {},
+	"other":             {},
+	"prefer_not_to_say": {},
+}
 
 func IsValidAvatarID(avatarID int) bool {
 	return avatarID >= 0 && avatarID <= MaxAvatarID
@@ -152,6 +164,70 @@ func (s *AuthService) UpdateDisplayName(ctx context.Context, userID uuid.UUID, d
 		return nil, err
 	}
 	user.DisplayName = displayName
+	return user, nil
+}
+
+func (s *AuthService) UpdateIntroduction(ctx context.Context, userID uuid.UUID, introduction string) (*model.User, error) {
+	if userID == uuid.Nil {
+		return nil, ErrNotFound
+	}
+	introduction = strings.TrimSpace(introduction)
+	if utf8.RuneCountInString(introduction) > MaxIntroductionRunes || strings.ContainsRune(introduction, '\x00') {
+		return nil, ErrInvalidIntroduction
+	}
+	user, err := s.Profile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.users.UpdateIntroduction(ctx, userID, introduction); err != nil {
+		return nil, err
+	}
+	user.Introduction = introduction
+	return user, nil
+}
+
+func (s *AuthService) UpdateGender(ctx context.Context, userID uuid.UUID, gender string) (*model.User, error) {
+	if userID == uuid.Nil {
+		return nil, ErrNotFound
+	}
+	gender = strings.ToLower(strings.TrimSpace(gender))
+	if _, ok := allowedProfileGenders[gender]; !ok {
+		return nil, ErrInvalidGender
+	}
+	user, err := s.Profile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.users.UpdateGender(ctx, userID, gender); err != nil {
+		return nil, err
+	}
+	user.Gender = gender
+	return user, nil
+}
+
+func (s *AuthService) UpdateBirthday(ctx context.Context, userID uuid.UUID, birthday string) (*model.User, error) {
+	if userID == uuid.Nil {
+		return nil, ErrNotFound
+	}
+	birthday = strings.TrimSpace(birthday)
+	if birthday != "" {
+		parsed, err := time.Parse("2006-01-02", birthday)
+		if err != nil || parsed.Format("2006-01-02") != birthday || parsed.Year() < 1900 {
+			return nil, ErrInvalidBirthday
+		}
+		today := time.Now().UTC().Format("2006-01-02")
+		if birthday > today {
+			return nil, ErrInvalidBirthday
+		}
+	}
+	user, err := s.Profile(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.users.UpdateBirthday(ctx, userID, birthday); err != nil {
+		return nil, err
+	}
+	user.Birthday = birthday
 	return user, nil
 }
 

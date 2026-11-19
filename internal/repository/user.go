@@ -17,6 +17,9 @@ type UserRepository interface {
 	FindByLogin(ctx context.Context, identifier string) (*model.User, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*model.User, error)
 	UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error
+	UpdateIntroduction(ctx context.Context, id uuid.UUID, introduction string) error
+	UpdateGender(ctx context.Context, id uuid.UUID, gender string) error
+	UpdateBirthday(ctx context.Context, id uuid.UUID, birthday string) error
 	UpdateChannelNumber(ctx context.Context, id uuid.UUID, channelNumber int) error
 	UpdateAvatarID(ctx context.Context, id uuid.UUID, avatarID int) error
 }
@@ -151,9 +154,25 @@ func (r *GormUserRepository) UpdateAvatarID(ctx context.Context, id uuid.UUID, a
 }
 
 func (r *GormUserRepository) UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error {
-	result := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update("display_name", displayName)
+	return r.updateProfileField(ctx, id, "display_name", displayName, "display name")
+}
+
+func (r *GormUserRepository) UpdateIntroduction(ctx context.Context, id uuid.UUID, introduction string) error {
+	return r.updateProfileField(ctx, id, "introduction", introduction, "introduction")
+}
+
+func (r *GormUserRepository) UpdateGender(ctx context.Context, id uuid.UUID, gender string) error {
+	return r.updateProfileField(ctx, id, "gender", gender, "gender")
+}
+
+func (r *GormUserRepository) UpdateBirthday(ctx context.Context, id uuid.UUID, birthday string) error {
+	return r.updateProfileField(ctx, id, "birthday", birthday, "birthday")
+}
+
+func (r *GormUserRepository) updateProfileField(ctx context.Context, id uuid.UUID, field, value, label string) error {
+	result := r.db.WithContext(ctx).Model(&model.User{}).Where("id = ?", id).Update(field, value)
 	if result.Error != nil {
-		return fmt.Errorf("update user display name: %w", result.Error)
+		return fmt.Errorf("update user %s: %w", label, result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound

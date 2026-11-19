@@ -106,6 +106,33 @@ func (r *memoryUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, display
 	return nil
 }
 
+func (r *memoryUsers) UpdateIntroduction(_ context.Context, id uuid.UUID, introduction string) error {
+	user, ok := r.byID[id]
+	if !ok {
+		return gorm.ErrRecordNotFound
+	}
+	user.Introduction = introduction
+	return nil
+}
+
+func (r *memoryUsers) UpdateGender(_ context.Context, id uuid.UUID, gender string) error {
+	user, ok := r.byID[id]
+	if !ok {
+		return gorm.ErrRecordNotFound
+	}
+	user.Gender = gender
+	return nil
+}
+
+func (r *memoryUsers) UpdateBirthday(_ context.Context, id uuid.UUID, birthday string) error {
+	user, ok := r.byID[id]
+	if !ok {
+		return gorm.ErrRecordNotFound
+	}
+	user.Birthday = birthday
+	return nil
+}
+
 func TestAuthServiceUpdatesChannelNumber(t *testing.T) {
 	repo := newMemoryUsers()
 	service := NewAuthService(repo, utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute))
@@ -177,6 +204,46 @@ func TestAuthServiceUpdatesDisplayNameWithValidation(t *testing.T) {
 	updated, err = service.UpdateDisplayName(context.Background(), user.ID, "")
 	if err != nil || updated.DisplayName != "" {
 		t.Fatalf("clear display name = %#v, err=%v", updated, err)
+	}
+}
+
+func TestAuthServiceUpdatesIntroductionGenderAndBirthday(t *testing.T) {
+	repo := newMemoryUsers()
+	auth := NewAuthService(repo, utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute))
+	user, err := auth.Register(context.Background(), "profile_details", "", "abc123")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	updated, err := auth.UpdateIntroduction(context.Background(), user.ID, "  Ridge pilot  ")
+	if err != nil || updated.Introduction != "Ridge pilot" {
+		t.Fatalf("UpdateIntroduction() = %#v, err=%v", updated, err)
+	}
+	updated, err = auth.UpdateGender(context.Background(), user.ID, "FEMALE")
+	if err != nil || updated.Gender != "female" {
+		t.Fatalf("UpdateGender() = %#v, err=%v", updated, err)
+	}
+	updated, err = auth.UpdateBirthday(context.Background(), user.ID, "1990-05-06")
+	if err != nil || updated.Birthday != "1990-05-06" {
+		t.Fatalf("UpdateBirthday() = %#v, err=%v", updated, err)
+	}
+	if stored := repo.byID[user.ID]; stored.Introduction != "Ridge pilot" || stored.Gender != "female" || stored.Birthday != "1990-05-06" {
+		t.Fatalf("profile details not persisted: %#v", stored)
+	}
+
+	if _, err := auth.UpdateIntroduction(context.Background(), user.ID, strings.Repeat("x", MaxIntroductionRunes+1)); !errors.Is(err, ErrInvalidIntroduction) {
+		t.Errorf("oversized introduction error = %v", err)
+	}
+	if _, err := auth.UpdateGender(context.Background(), user.ID, "unknown"); !errors.Is(err, ErrInvalidGender) {
+		t.Errorf("unknown gender error = %v", err)
+	}
+	for _, birthday := range []string{"2024-02-30", time.Now().UTC().AddDate(0, 0, 1).Format("2006-01-02")} {
+		if _, err := auth.UpdateBirthday(context.Background(), user.ID, birthday); !errors.Is(err, ErrInvalidBirthday) {
+			t.Errorf("invalid birthday %q error = %v", birthday, err)
+		}
+	}
+	if _, err := auth.UpdateBirthday(context.Background(), user.ID, ""); err != nil {
+		t.Errorf("clearing birthday error = %v", err)
 	}
 }
 

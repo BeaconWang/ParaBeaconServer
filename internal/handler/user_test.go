@@ -69,6 +69,73 @@ func (r *profileTestUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, di
 	r.user.DisplayName = displayName
 	return nil
 }
+func (r *profileTestUsers) UpdateIntroduction(_ context.Context, id uuid.UUID, introduction string) error {
+	if r.user == nil || r.user.ID != id {
+		return service.ErrNotFound
+	}
+	r.user.Introduction = introduction
+	return nil
+}
+func (r *profileTestUsers) UpdateGender(_ context.Context, id uuid.UUID, gender string) error {
+	if r.user == nil || r.user.ID != id {
+		return service.ErrNotFound
+	}
+	r.user.Gender = gender
+	return nil
+}
+func (r *profileTestUsers) UpdateBirthday(_ context.Context, id uuid.UUID, birthday string) error {
+	if r.user == nil || r.user.ID != id {
+		return service.ErrNotFound
+	}
+	r.user.Birthday = birthday
+	return nil
+}
+
+func TestUpdateProfileDetails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID := uuid.New()
+	users := &profileTestUsers{user: &model.User{
+		ID: userID, Username: "pilot_one", DisplayName: "Beacon",
+	}}
+	handler := NewUserHandler(service.NewAuthService(users, nil))
+	engine := gin.New()
+	engine.PATCH("/profile", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.UpdateProfile(c)
+	})
+
+	request := httptest.NewRequest(http.MethodPatch, "/profile", strings.NewReader(`{"introduction":"Ridge pilot","gender":"female","birthday":"1990-05-06"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("profile details status = %d: %s", response.Code, response.Body.String())
+	}
+	if users.user.Introduction != "Ridge pilot" || users.user.Gender != "female" || users.user.Birthday != "1990-05-06" {
+		t.Fatalf("profile details were not stored: %#v", users.user)
+	}
+	var body struct {
+		User struct {
+			Introduction string `json:"introduction"`
+			Gender       string `json:"gender"`
+			Birthday     string `json:"birthday"`
+		} `json:"user"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode profile details: %v", err)
+	}
+	if body.User.Introduction != "Ridge pilot" || body.User.Gender != "female" || body.User.Birthday != "1990-05-06" {
+		t.Fatalf("profile details response = %#v", body.User)
+	}
+
+	request = httptest.NewRequest(http.MethodPatch, "/profile", strings.NewReader(`{"gender":"unrecognized"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid gender status = %d, want 400", response.Code)
+	}
+}
 
 func TestUpdateProfileDisplayNameRequiresAuthenticatedOwner(t *testing.T) {
 	gin.SetMode(gin.TestMode)

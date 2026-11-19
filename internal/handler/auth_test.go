@@ -74,6 +74,27 @@ func (r *authTestUsers) UpdateDisplayName(_ context.Context, id uuid.UUID, displ
 	r.user.DisplayName = displayName
 	return nil
 }
+func (r *authTestUsers) UpdateIntroduction(_ context.Context, id uuid.UUID, introduction string) error {
+	if r.user.ID != id {
+		return gorm.ErrRecordNotFound
+	}
+	r.user.Introduction = introduction
+	return nil
+}
+func (r *authTestUsers) UpdateGender(_ context.Context, id uuid.UUID, gender string) error {
+	if r.user.ID != id {
+		return gorm.ErrRecordNotFound
+	}
+	r.user.Gender = gender
+	return nil
+}
+func (r *authTestUsers) UpdateBirthday(_ context.Context, id uuid.UUID, birthday string) error {
+	if r.user.ID != id {
+		return gorm.ErrRecordNotFound
+	}
+	r.user.Birthday = birthday
+	return nil
+}
 
 var _ repository.UserRepository = (*authTestUsers)(nil)
 

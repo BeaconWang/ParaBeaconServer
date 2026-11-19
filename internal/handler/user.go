@@ -21,6 +21,9 @@ func NewUserHandler(auth *service.AuthService) *UserHandler {
 
 type updateProfileRequest struct {
 	DisplayName   *string `json:"display_name"`
+	Introduction  *string `json:"introduction"`
+	Gender        *string `json:"gender"`
+	Birthday      *string `json:"birthday"`
 	ChannelNumber *int    `json:"channel_number"`
 	AvatarID      *int    `json:"avatar_id"`
 }
@@ -83,7 +86,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	}
 	var request updateProfileRequest
 	if err := c.ShouldBindJSON(&request); err != nil ||
-		(request.DisplayName == nil && request.ChannelNumber == nil && request.AvatarID == nil) {
+		(request.DisplayName == nil && request.Introduction == nil && request.Gender == nil && request.Birthday == nil && request.ChannelNumber == nil && request.AvatarID == nil) {
 		respondError(c, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -101,6 +104,15 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 	if request.DisplayName != nil {
 		user, err = h.auth.UpdateDisplayName(c.Request.Context(), userID, *request.DisplayName)
 	}
+	if err == nil && request.Introduction != nil {
+		user, err = h.auth.UpdateIntroduction(c.Request.Context(), userID, *request.Introduction)
+	}
+	if err == nil && request.Gender != nil {
+		user, err = h.auth.UpdateGender(c.Request.Context(), userID, *request.Gender)
+	}
+	if err == nil && request.Birthday != nil {
+		user, err = h.auth.UpdateBirthday(c.Request.Context(), userID, *request.Birthday)
+	}
 	if err == nil && request.ChannelNumber != nil {
 		user, err = h.auth.UpdateChannelNumber(c.Request.Context(), userID, *request.ChannelNumber)
 	}
@@ -111,6 +123,12 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		switch {
 		case errors.Is(err, service.ErrInvalidDisplayName):
 			respondError(c, http.StatusBadRequest, "invalid display name")
+		case errors.Is(err, service.ErrInvalidIntroduction):
+			respondError(c, http.StatusBadRequest, "invalid introduction")
+		case errors.Is(err, service.ErrInvalidGender):
+			respondError(c, http.StatusBadRequest, "invalid gender")
+		case errors.Is(err, service.ErrInvalidBirthday):
+			respondError(c, http.StatusBadRequest, "invalid birthday")
 		case errors.Is(err, service.ErrInvalidChannelNumber):
 			respondError(c, http.StatusBadRequest, "invalid channel number")
 		case errors.Is(err, service.ErrInvalidAvatarID):
@@ -122,7 +140,7 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.Introduction, user.Gender, user.Birthday, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
 }
 
 func (h *UserHandler) Profile(c *gin.Context) {
@@ -145,5 +163,5 @@ func (h *UserHandler) Profile(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
+	c.JSON(http.StatusOK, gin.H{"user": toPublicUser(user.ID.String(), user.Username, user.DisplayName, user.Introduction, user.Gender, user.Birthday, user.PilotNumber, user.ChannelNumber, user.AvatarID, user.ProfileImageKey, user.Email, user.CreatedAt)})
 }
