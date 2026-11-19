@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,8 @@ const (
 	ChatScopeDirect          = "direct"
 	ChatMaxTextRunes         = 1000
 	ChatLocationStatusMaxAge = 90 * time.Second
+	ChatAccountPageSize      = 30
+	ChatAccountMaxPageSize   = 50
 )
 
 var (
@@ -51,6 +54,11 @@ type ChatCursor struct {
 type ChatPage struct {
 	Messages   []ChatMessage `json:"messages"`
 	NextCursor string        `json:"next_cursor,omitempty"`
+}
+
+type ChatAccountPage struct {
+	Accounts   []repository.ChatAccount `json:"accounts"`
+	NextCursor string                   `json:"next_cursor,omitempty"`
 }
 
 type SendChatRequest struct {
@@ -96,12 +104,16 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 	if err != nil {
 		return ChatMessage{}, err
 	}
+	senderName := strings.TrimSpace(sender.DisplayName)
+	if senderName == "" {
+		senderName = sender.Username
+	}
 	message := &model.ChatMessage{
 		ID:                uuid.New(),
 		Scope:             request.Scope,
 		SenderID:          sender.ID,
 		SenderPilotNumber: sender.PilotNumber,
-		SenderName:        sender.Username,
+		SenderName:        senderName,
 		Text:              text,
 		CreatedAt:         time.Now().UTC(),
 	}
@@ -155,6 +167,49 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 		return ChatMessage{}, err
 	}
 	return chatMessageFromModel(message), nil
+}
+
+func (s *ChatService) SearchAccounts(ctx context.Context, requesterID uuid.UUID, rawQuery, rawCursor string, limit int) (ChatAccountPage, error) {
+	query := strings.TrimSpace(rawQuery)
+	if requesterID == uuid.Nil ||
+		!utf8.ValidString(query) ||
+		utf8.RuneCountInString(query) > 64 ||
+		strings.ContainsAny(query, "\x00\r\n") {
+		return ChatAccountPage{}, ErrInvalidChatRequest
+	}
+	if query != "" && utf8.RuneCountInString(query) < 2 {
+		return ChatAccountPage{}, ErrInvalidChatRequest
+	}
+	if limit < 1 || limit > ChatAccountMaxPageSize {
+		return ChatAccountPage{}, ErrInvalidChatRequest
+	}
+	afterPilotNumber := 0
+	if rawCursor != "" {
+		parsed, err := strconv.Atoi(rawCursor)
+		if err != nil || parsed < 100000 || parsed > 999999 {
+			return ChatAccountPage{}, ErrInvalidChatRequest
+		}
+		afterPilotNumber = parsed
+	}
+	accounts, err := s.repository.SearchChatAccounts(
+		ctx,
+		requesterID,
+		query,
+		afterPilotNumber,
+		limit+1,
+	)
+	if err != nil {
+		return ChatAccountPage{}, err
+	}
+	hasMore := len(accounts) > limit
+	if hasMore {
+		accounts = accounts[:limit]
+	}
+	page := ChatAccountPage{Accounts: accounts}
+	if hasMore && len(accounts) > 0 {
+		page.NextCursor = strconv.Itoa(accounts[len(accounts)-1].PilotNumber)
+	}
+	return page, nil
 }
 
 func (s *ChatService) PublicLocationStatus(ctx context.Context, requesterID uuid.UUID, pilotNumber int) (bool, error) {

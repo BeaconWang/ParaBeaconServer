@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +37,33 @@ func (r *memoryChatRepository) FindChatUserByPilotNumber(_ context.Context, numb
 		}
 	}
 	return nil, gorm.ErrRecordNotFound
+}
+
+func (r *memoryChatRepository) SearchChatAccounts(_ context.Context, requesterID uuid.UUID, query string, afterPilotNumber, limit int) ([]repository.ChatAccount, error) {
+	query = strings.ToLower(query)
+	accounts := make([]repository.ChatAccount, 0)
+	for id, user := range r.users {
+		if id == requesterID || user.PilotNumber <= afterPilotNumber {
+			continue
+		}
+		if query != "" &&
+			!strings.Contains(strings.ToLower(user.Username), query) &&
+			!strings.Contains(strings.ToLower(user.DisplayName), query) {
+			continue
+		}
+		accounts = append(accounts, repository.ChatAccount{
+			PilotNumber: user.PilotNumber,
+			Username:    user.Username,
+			DisplayName: user.DisplayName,
+		})
+	}
+	sort.Slice(accounts, func(i, j int) bool {
+		return accounts[i].PilotNumber < accounts[j].PilotNumber
+	})
+	if len(accounts) > limit {
+		accounts = accounts[:limit]
+	}
+	return accounts, nil
 }
 
 func (r *memoryChatRepository) HasFreshPublicLocation(_ context.Context, pilotNumber int, _, _ time.Time) (bool, error) {
@@ -85,6 +113,74 @@ func (r *memoryChatRepository) list(matches func(model.ChatMessage) bool, before
 	return rows
 }
 
+func TestSearchAccountsFindsUsernameAndDisplayNameAndPages(t *testing.T) {
+	requesterID, aliceID, bobID, carolID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
+		requesterID: {ID: requesterID, PilotNumber: 100001, Username: "my_account", DisplayName: "My Name"},
+		aliceID:     {ID: aliceID, PilotNumber: 100002, Username: "ridge_runner", DisplayName: "Alice Summit"},
+		bobID:       {ID: bobID, PilotNumber: 100003, Username: "bob_wings", DisplayName: "Robert Cloud"},
+		carolID:     {ID: carolID, PilotNumber: 100004, Username: "carol", DisplayName: "Alice Ridge"},
+	}}
+	chat := NewChatService(repository)
+
+	byUsername, err := chat.SearchAccounts(context.Background(), requesterID, "WINGS", "", 10)
+	if err != nil {
+		t.Fatalf("search username: %v", err)
+	}
+	if len(byUsername.Accounts) != 1 || byUsername.Accounts[0].Username != "bob_wings" {
+		t.Fatalf("username matches = %#v", byUsername.Accounts)
+	}
+	byDisplayName, err := chat.SearchAccounts(context.Background(), requesterID, "alice", "", 10)
+	if err != nil {
+		t.Fatalf("search display name: %v", err)
+	}
+	if len(byDisplayName.Accounts) != 2 || byDisplayName.Accounts[0].DisplayName != "Alice Summit" {
+		t.Fatalf("display-name matches = %#v", byDisplayName.Accounts)
+	}
+
+	firstPage, err := chat.SearchAccounts(context.Background(), requesterID, "", "", 2)
+	if err != nil {
+		t.Fatalf("list first account page: %v", err)
+	}
+	if len(firstPage.Accounts) != 2 || firstPage.NextCursor != "100003" {
+		t.Fatalf("first page = %#v", firstPage)
+	}
+	secondPage, err := chat.SearchAccounts(context.Background(), requesterID, "", firstPage.NextCursor, 2)
+	if err != nil {
+		t.Fatalf("list second account page: %v", err)
+	}
+	if len(secondPage.Accounts) != 1 || secondPage.Accounts[0].Username != "carol" || secondPage.NextCursor != "" {
+		t.Fatalf("second page = %#v", secondPage)
+	}
+	for _, account := range append(firstPage.Accounts, secondPage.Accounts...) {
+		if account.PilotNumber == 100001 {
+			t.Fatal("account search included the requester")
+		}
+	}
+}
+
+func TestSearchAccountsRejectsInvalidQueriesAndPaging(t *testing.T) {
+	requesterID := uuid.New()
+	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
+		requesterID: {ID: requesterID, PilotNumber: 123456, Username: "pilot"},
+	}}
+	chat := NewChatService(repository)
+	for _, testCase := range []struct {
+		query  string
+		cursor string
+		limit  int
+	}{
+		{query: "a", limit: 10},
+		{query: strings.Repeat("a", 65), limit: 10},
+		{query: "pilot", cursor: "not-a-number", limit: 10},
+		{query: "pilot", limit: ChatAccountMaxPageSize + 1},
+	} {
+		if _, err := chat.SearchAccounts(context.Background(), requesterID, testCase.query, testCase.cursor, testCase.limit); !errors.Is(err, ErrInvalidChatRequest) {
+			t.Errorf("SearchAccounts(%q, %q, %d) error = %v, want invalid request", testCase.query, testCase.cursor, testCase.limit, err)
+		}
+	}
+}
+
 func TestPublicLocationStatusOnlyReportsFreshPublicPartnerLocation(t *testing.T) {
 	requesterID, partnerID := uuid.New(), uuid.New()
 	repository := &memoryChatRepository{
@@ -118,7 +214,7 @@ func TestChatRoutesPublicChannelAndDirectMessages(t *testing.T) {
 	aliceID, bobID, carolID := uuid.New(), uuid.New(), uuid.New()
 	channelNumber := 345678
 	repository := &memoryChatRepository{users: map[uuid.UUID]repository.ChatUser{
-		aliceID: {ID: aliceID, PilotNumber: 123456, Username: "alice"},
+		aliceID: {ID: aliceID, PilotNumber: 123456, Username: "alice", DisplayName: "Alice Ridge"},
 		bobID:   {ID: bobID, PilotNumber: 234567, Username: "bob"},
 		carolID: {ID: carolID, PilotNumber: 345678, Username: "carol"},
 	}}
@@ -128,7 +224,7 @@ func TestChatRoutesPublicChannelAndDirectMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("send public: %v", err)
 	}
-	if publicMessage.Text != "hello world" || publicMessage.SenderPilotNumber != 123456 || publicMessage.Scope != ChatScopePublic {
+	if publicMessage.Text != "hello world" || publicMessage.SenderPilotNumber != 123456 || publicMessage.Scope != ChatScopePublic || publicMessage.SenderName != "Alice Ridge" {
 		t.Fatalf("public message = %#v", publicMessage)
 	}
 	chat.rateMu.Lock()

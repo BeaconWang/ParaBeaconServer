@@ -18,8 +18,12 @@ import (
 )
 
 type chatStatusTestRepository struct {
-	pilotID uuid.UUID
-	sharing bool
+	pilotID     uuid.UUID
+	sharing     bool
+	accounts    []repository.ChatAccount
+	searchQuery string
+	searchAfter int
+	searchLimit int
 }
 
 func (r *chatStatusTestRepository) FindChatUserByID(_ context.Context, id uuid.UUID) (*repository.ChatUser, error) {
@@ -34,6 +38,22 @@ func (r *chatStatusTestRepository) FindChatUserByPilotNumber(_ context.Context, 
 		return nil, gorm.ErrRecordNotFound
 	}
 	return &repository.ChatUser{ID: r.pilotID, PilotNumber: number, Username: "partner"}, nil
+}
+
+func (r *chatStatusTestRepository) SearchChatAccounts(_ context.Context, _ uuid.UUID, query string, after, limit int) ([]repository.ChatAccount, error) {
+	r.searchQuery = query
+	r.searchAfter = after
+	r.searchLimit = limit
+	accounts := make([]repository.ChatAccount, 0, len(r.accounts))
+	for _, account := range r.accounts {
+		if account.PilotNumber > after {
+			accounts = append(accounts, account)
+		}
+	}
+	if len(accounts) > limit {
+		accounts = accounts[:limit]
+	}
+	return accounts, nil
 }
 
 func (r *chatStatusTestRepository) HasFreshPublicLocation(_ context.Context, number int, _, _ time.Time) (bool, error) {
@@ -54,6 +74,58 @@ func (*chatStatusTestRepository) ListChannelChat(context.Context, int, time.Time
 
 func (*chatStatusTestRepository) ListDirectChat(context.Context, uuid.UUID, uuid.UUID, time.Time, uuid.UUID, int) ([]model.ChatMessage, error) {
 	return nil, nil
+}
+
+func TestSearchChatAccountsRequiresAuthenticationAndReturnsMinimalResults(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	requesterID := uuid.New()
+	repository := &chatStatusTestRepository{
+		pilotID: requesterID,
+		accounts: []repository.ChatAccount{{
+			PilotNumber: 234567,
+			Username:    "sky_pilot",
+			DisplayName: "Sky Pilot",
+		}},
+	}
+	handler := NewChatHandler(service.NewChatService(repository), nil)
+	engine := gin.New()
+	engine.GET("/chat/accounts", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, requesterID)
+		handler.SearchAccounts(c)
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/chat/accounts?q=Sky&cursor=123456&limit=5", nil)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if repository.searchQuery != "Sky" || repository.searchAfter != 123456 || repository.searchLimit != 6 {
+		t.Fatalf("search args = %q, %d, %d", repository.searchQuery, repository.searchAfter, repository.searchLimit)
+	}
+	var responseBody struct {
+		Accounts []map[string]json.RawMessage `json:"accounts"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &responseBody); err != nil {
+		t.Fatalf("decode account search: %v", err)
+	}
+	if len(responseBody.Accounts) != 1 {
+		t.Fatalf("account count = %d, want 1", len(responseBody.Accounts))
+	}
+	for _, forbidden := range []string{"email", "id", "password_hash"} {
+		if _, exists := responseBody.Accounts[0][forbidden]; exists {
+			t.Errorf("account result exposed %q", forbidden)
+		}
+	}
+
+	anonymousEngine := gin.New()
+	anonymousEngine.GET("/chat/accounts", handler.SearchAccounts)
+	request = httptest.NewRequest(http.MethodGet, "/chat/accounts", nil)
+	response = httptest.NewRecorder()
+	anonymousEngine.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous status = %d, want %d", response.Code, http.StatusUnauthorized)
+	}
 }
 
 func TestPilotLocationStatusReturnsOnlyBooleanForAuthenticatedChatUser(t *testing.T) {

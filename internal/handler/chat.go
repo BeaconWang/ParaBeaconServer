@@ -58,6 +58,35 @@ func (h *ChatHandler) PilotLocationStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"actively_sharing_location": sharing})
 }
 
+func (h *ChatHandler) SearchAccounts(c *gin.Context) {
+	userID, ok := chatRequesterID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	limit := service.ChatAccountPageSize
+	if rawLimit := c.Query("limit"); rawLimit != "" {
+		parsed, err := strconv.Atoi(rawLimit)
+		if err != nil || parsed < 1 || parsed > service.ChatAccountMaxPageSize {
+			respondError(c, http.StatusBadRequest, "invalid account search limit")
+			return
+		}
+		limit = parsed
+	}
+	page, err := h.chat.SearchAccounts(
+		c.Request.Context(),
+		userID,
+		c.Query("q"),
+		c.Query("cursor"),
+		limit,
+	)
+	if err != nil {
+		respondChatError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, page)
+}
+
 func (h *ChatHandler) ListMessages(c *gin.Context) {
 	userID, ok := chatRequesterID(c)
 	if !ok {

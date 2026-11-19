@@ -16,11 +16,19 @@ type ChatUser struct {
 	ID          uuid.UUID
 	PilotNumber int
 	Username    string
+	DisplayName string
+}
+
+type ChatAccount struct {
+	PilotNumber int    `json:"pilot_number"`
+	Username    string `json:"username"`
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 type ChatRepository interface {
 	FindChatUserByID(context.Context, uuid.UUID) (*ChatUser, error)
 	FindChatUserByPilotNumber(context.Context, int) (*ChatUser, error)
+	SearchChatAccounts(context.Context, uuid.UUID, string, int, int) ([]ChatAccount, error)
 	CreateChatMessage(context.Context, *model.ChatMessage) error
 	ListPublicChat(context.Context, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
 	ListChannelChat(context.Context, int, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
@@ -40,7 +48,7 @@ func (r *GormChatRepository) FindChatUserByID(ctx context.Context, id uuid.UUID)
 	var user ChatUser
 	if err := r.db.WithContext(ctx).
 		Table("users").
-		Select("id, pilot_number, username").
+		Select("id, pilot_number, username, display_name").
 		Where("id = ?", id).
 		Take(&user).Error; err != nil {
 		return nil, fmt.Errorf("find chat user: %w", err)
@@ -58,6 +66,25 @@ func (r *GormChatRepository) FindChatUserByPilotNumber(ctx context.Context, numb
 		return nil, fmt.Errorf("find chat pilot: %w", err)
 	}
 	return &user, nil
+}
+
+func (r *GormChatRepository) SearchChatAccounts(ctx context.Context, requesterID uuid.UUID, query string, afterPilotNumber, limit int) ([]ChatAccount, error) {
+	accounts := make([]ChatAccount, 0, limit)
+	databaseQuery := r.db.WithContext(ctx).
+		Table("users").
+		Select("pilot_number, username, display_name").
+		Where("id <> ? AND pilot_number > ?", requesterID, afterPilotNumber)
+	if query != "" {
+		databaseQuery = databaseQuery.Where(
+			"POSITION(LOWER(?) IN LOWER(username)) > 0 OR POSITION(LOWER(?) IN LOWER(display_name)) > 0",
+			query,
+			query,
+		)
+	}
+	if err := databaseQuery.Order("pilot_number ASC").Limit(limit).Scan(&accounts).Error; err != nil {
+		return nil, fmt.Errorf("search chat accounts: %w", err)
+	}
+	return accounts, nil
 }
 
 func (r *GormChatRepository) HasFreshPublicLocation(ctx context.Context, pilotNumber int, observedSince, observedUntil time.Time) (bool, error) {
