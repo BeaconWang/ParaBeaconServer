@@ -119,8 +119,9 @@ func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID
 		Where("latest.latitude BETWEEN ? AND ?", south, north)
 	if userID != uuid.Nil {
 		query = query.
+			Joins("JOIN users AS viewer ON viewer.id = ?", userID).
 			Where("s.user_id <> ?", userID).
-			Where("u.channel_number > 0 AND u.channel_number = (SELECT channel_number FROM users WHERE id = ?)", userID)
+			Where("(viewer.channel_number = 0 OR (u.channel_number > 0 AND u.channel_number = viewer.channel_number))")
 	} else {
 		query = query.Where("1 = 0")
 	}
