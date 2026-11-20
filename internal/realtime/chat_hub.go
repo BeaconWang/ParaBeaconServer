@@ -571,26 +571,28 @@ func (c *chatClient) subscribe(incoming chatClientMessage) {
 	}
 	c.lastSubscribeAt = now
 	switch incoming.Scope {
-	case "presence":
-		if incoming.ChannelNumber != 0 || incoming.PilotNumber != 0 {
+	case "presence", "public":
+		if incoming.PilotNumber != 0 || incoming.ChannelNumber < 0 || incoming.ChannelNumber > 999999 {
 			c.sendError("invalid_subscription")
 			return
 		}
-		c.hub.mu.Lock()
-		c.channel = 0
-		c.peerID = uuid.Nil
-		c.hub.mu.Unlock()
-		c.enqueueJSON(chatServerMessage{Type: "subscribed", Scope: "presence"})
-	case "public":
-		if incoming.ChannelNumber != 0 || incoming.PilotNumber != 0 {
-			c.sendError("invalid_subscription")
-			return
+		if incoming.ChannelNumber > 0 {
+			ctx, cancel := context.WithTimeout(c.hub.ctx, 5*time.Second)
+			err := c.hub.chat.ValidateChannel(ctx, c.userID, incoming.ChannelNumber)
+			cancel()
+			if err != nil {
+				c.sendError(chatErrorCode(err))
+				return
+			}
 		}
 		c.hub.mu.Lock()
-		c.channel = 0
+		c.channel = incoming.ChannelNumber
 		c.peerID = uuid.Nil
 		c.hub.mu.Unlock()
-		c.enqueueJSON(chatServerMessage{Type: "subscribed", Scope: service.ChatScopePublic})
+		c.enqueueJSON(chatServerMessage{
+			Type:  "subscribed",
+			Scope: incoming.Scope,
+		})
 	case service.ChatScopeChannel:
 		ctx, cancel := context.WithTimeout(c.hub.ctx, 5*time.Second)
 		err := c.hub.chat.ValidateChannel(ctx, c.userID, incoming.ChannelNumber)
@@ -609,15 +611,22 @@ func (c *chatClient) subscribe(incoming chatClientMessage) {
 		c.hub.mu.Unlock()
 		c.enqueueJSON(chatServerMessage{Type: "subscribed", Scope: fmt.Sprintf("channel:%06d", incoming.ChannelNumber)})
 	case service.ChatScopeDirect:
+		if incoming.ChannelNumber < 0 || incoming.ChannelNumber > 999999 {
+			c.sendError("invalid_subscription")
+			return
+		}
 		ctx, cancel := context.WithTimeout(c.hub.ctx, 5*time.Second)
 		peerID, err := c.hub.chat.SubscribePeer(ctx, c.userID, incoming.PilotNumber)
+		if err == nil && incoming.ChannelNumber > 0 {
+			err = c.hub.chat.ValidateChannel(ctx, c.userID, incoming.ChannelNumber)
+		}
 		cancel()
 		if err != nil {
 			c.sendError(chatErrorCode(err))
 			return
 		}
 		c.hub.mu.Lock()
-		c.channel = 0
+		c.channel = incoming.ChannelNumber
 		c.peerID = peerID
 		c.hub.mu.Unlock()
 		c.enqueueJSON(chatServerMessage{Type: "subscribed", Scope: fmt.Sprintf("direct:%06d", incoming.PilotNumber)})
