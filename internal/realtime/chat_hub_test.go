@@ -90,9 +90,11 @@ func TestChatAudienceRoutesOnlyToMatchingClients(t *testing.T) {
 		client *chatClient
 		want   []bool
 	}{
-		{&chatClient{userID: sender}, []bool{true, false, false}},
+		{&chatClient{userID: sender}, []bool{true, false, true}},
 		{&chatClient{userID: outsider, channel: channel}, []bool{true, true, false}},
 		{&chatClient{userID: recipient, peerID: sender}, []bool{true, false, true}},
+		{&chatClient{userID: recipient}, []bool{true, false, true}},
+		{&chatClient{userID: recipient, peerID: outsider}, []bool{true, false, true}},
 		{&chatClient{userID: outsider, peerID: sender}, []bool{true, false, false}},
 	}
 	for _, testCase := range clients {

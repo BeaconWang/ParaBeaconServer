@@ -513,8 +513,7 @@ func (c *chatClient) matches(audience chatAudience) bool {
 	case service.ChatScopeChannel:
 		return c.channel == audience.ChannelNumber
 	case service.ChatScopeDirect:
-		return (c.userID == audience.SenderID && c.peerID == audience.RecipientID) ||
-			(c.userID == audience.RecipientID && c.peerID == audience.SenderID)
+		return c.userID == audience.SenderID || c.userID == audience.RecipientID
 	default:
 		return false
 	}
