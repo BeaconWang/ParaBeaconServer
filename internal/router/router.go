@@ -101,6 +101,11 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		return nil, err
 	}
 	appReleaseHandler := handler.NewAppReleaseHandler(appReleaseService)
+	sessionMetricsHandler := handler.NewSessionMetricsHandler(
+		service.NewSessionMetricsService(repository.NewSessionMetricRepository(db)),
+		middleware.NewFixedWindowLimiter(120, time.Minute, 10000),
+		middleware.NewFixedWindowLimiter(120, time.Minute, 10000),
+	)
 	v1 := engine.Group("/api/v1")
 	{
 		auth := v1.Group("/auth")
@@ -117,6 +122,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Publish)
 		v1.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), trackingHandler.ListPublicLocations)
 		v1.GET("/profile-images/:image_key", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), profileImageHandler.Get)
+		v1.POST("/metrics/session", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), sessionMetricsHandler.Ingest)
 
 		protected := v1.Group("")
 		protected.Use(middleware.RequireAuth(tokens, repository.NewRefreshTokenRepository(db)))

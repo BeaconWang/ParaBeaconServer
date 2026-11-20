@@ -35,7 +35,7 @@ func NewFixedWindowLimiter(limit int, window time.Duration, maxClients int) *Fix
 
 func (l *FixedWindowLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		allowed, retryAfter := l.allow(c.ClientIP())
+		allowed, retryAfter := l.AllowKey(c.ClientIP())
 		if !allowed {
 			c.Header("Retry-After", strconv.Itoa(retryAfter))
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "too many requests"})
@@ -43,6 +43,10 @@ func (l *FixedWindowLimiter) Middleware() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+func (l *FixedWindowLimiter) AllowKey(key string) (bool, int) {
+	return l.allow(key)
 }
 
 func (l *FixedWindowLimiter) allow(clientIP string) (bool, int) {
