@@ -113,6 +113,8 @@ func (r *memoryChatRepository) ListChatConversations(_ context.Context, requeste
 			if conversation.LastChatAt == nil || message.CreatedAt.After(*conversation.LastChatAt) {
 				lastChatAt := message.CreatedAt
 				conversation.LastChatAt = &lastChatAt
+				conversation.LastMessageText = message.Text
+				conversation.LastMessageKind = message.Kind
 			}
 		}
 		if pinnedAt, ok := r.pins[requesterID][id]; ok {

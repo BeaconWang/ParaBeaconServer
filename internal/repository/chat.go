@@ -44,6 +44,8 @@ type ChatConversation struct {
 	AvatarID        int        `json:"avatar_id"`
 	ProfileImageURL string     `json:"profile_image_url,omitempty"`
 	LastChatAt      *time.Time `json:"last_chat_at,omitempty"`
+	LastMessageText string     `json:"last_message_text,omitempty"`
+	LastMessageKind string     `json:"last_message_kind,omitempty"`
 	UnreadCount     int64      `json:"unread_count"`
 	Pinned          bool       `json:"pinned"`
 	PinnedAt        *time.Time `json:"-"`
@@ -140,6 +142,8 @@ func (r *GormChatRepository) ListChatConversations(ctx context.Context, requeste
 		peer.avatar_id,
 		CASE WHEN peer.profile_image_key <> '' THEN '/api/v1/profile-images/' || peer.profile_image_key ELSE '' END AS profile_image_url,
 		latest.last_chat_at,
+		COALESCE(latest.last_message_text, '') AS last_message_text,
+		COALESCE(latest.last_message_kind, 'text') AS last_message_kind,
 		COALESCE(unread.unread_count, 0) AS unread_count,
 		pins.pinned_at IS NOT NULL AS pinned,
 		pins.pinned_at,
@@ -151,11 +155,15 @@ func (r *GormChatRepository) ListChatConversations(ctx context.Context, requeste
 		Joins("LEFT JOIN chat_conversation_pins AS pins ON pins.owner_id = owner.id AND pins.peer_id = peer.id").
 		Joins("LEFT JOIN chat_conversation_reads AS reads ON reads.owner_id = owner.id AND reads.peer_id = peer.id").
 		Joins(`LEFT JOIN LATERAL (
-			SELECT MAX(message.created_at) AS last_chat_at
+			SELECT message.created_at AS last_chat_at,
+				message.text AS last_message_text,
+				message.kind AS last_message_kind
 			FROM chat_messages AS message
 			WHERE message.scope = ?
 				AND ((message.sender_id = owner.id AND message.recipient_id = peer.id)
 					OR (message.sender_id = peer.id AND message.recipient_id = owner.id))
+			ORDER BY message.created_at DESC, message.id DESC
+			LIMIT 1
 		) AS latest ON TRUE`, "direct").
 		Joins(`LEFT JOIN LATERAL (
 			SELECT COUNT(*) AS unread_count
