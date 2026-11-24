@@ -31,10 +31,25 @@ func TestReleasePageSupportsBeaconAccountPublishing(t *testing.T) {
 	if response.Code != 200 {
 		t.Fatalf("status = %d", response.Code)
 	}
-	for _, marker := range []string{"data-auth-widget", "publishAuthHint", "ParaBeaconAuth.authHeaders"} {
+	for _, marker := range []string{"data-auth-widget", "beaconAuthHint", "ParaBeaconAuth.authHeaders"} {
 		if !strings.Contains(response.Body.String(), marker) {
 			t.Errorf("release page does not contain %q", marker)
 		}
+	}
+}
+
+func TestReleaseHandlerServesReleaseConsoleWithSecurityPolicy(t *testing.T) {
+	request := httptest.NewRequest("GET", "/release", nil)
+	response := httptest.NewRecorder()
+	Handler().ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Security-Policy"); got == "" {
+		t.Fatal("release page has no content security policy")
+	}
+	if !strings.Contains(response.Body.String(), "Release management") {
+		t.Fatal("release page does not contain its title")
 	}
 }
 
@@ -48,7 +63,7 @@ func TestLiveHandlerServesLiveMapWithSecurityPolicy(t *testing.T) {
 	if got := response.Header().Get("Content-Security-Policy"); got == "" {
 		t.Fatal("live page has no content security policy")
 	}
-	if !strings.Contains(response.Body.String(), "Public flight tracking") {
+	if !strings.Contains(response.Body.String(), "Public live tracking") {
 		t.Fatal("live page does not contain its title")
 	}
 }

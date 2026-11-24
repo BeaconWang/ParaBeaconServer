@@ -105,28 +105,48 @@
       footer { display:block; }
       footer span { display:block; margin-bottom:7px; }
     }
+    .shell { width:min(1280px, calc(100% - 64px)); padding-top:28px; }
+    .topbar { padding:4px 0 22px; border-bottom:1px solid #ffffff14; }
+    nav { gap:10px; }
+    nav a, nav button, .button { border-radius:12px; background:#102038cc; }
+    .hero { grid-template-columns:minmax(0, 1.08fr) minmax(390px, .92fr); gap:clamp(48px, 8vw, 124px); min-height:calc(100dvh - 112px); padding:92px 0 108px; }
+    .eyebrow { letter-spacing:.24em; }
+    h1 { max-width:760px; font-size:clamp(54px, 7.5vw, 104px); line-height:.9; }
+    .hero-copy { max-width:620px; font-size:clamp(18px, 1.85vw, 21px); }
+    .hero-note { color:#a5b4ca; }
+    .signal-card { padding:22px; border-radius:28px; background:linear-gradient(145deg, #172f4bf2, #091624f7); box-shadow:0 35px 100px #0008; }
+    .signal-visual { height:310px; border-radius:20px; background:linear-gradient(#1b385333 1px, transparent 1px), linear-gradient(90deg, #1b385333 1px, transparent 1px), radial-gradient(circle at 54% 46%, #70e7c01c, transparent 34%), #071320; background-size:42px 42px, 42px 42px, auto, auto; }
+    .signal-coordinates, .signal-code { font-size:9px; letter-spacing:.12em; }
+    .signal-metrics { gap:10px; }
+    .metric { padding:14px 13px; border-radius:14px; background:#071320aa; }
+    .capability { padding-top:34px; }
+    .feature { min-height:270px; padding:25px; border-radius:20px; }
+    .closing { padding:34px; border-radius:22px; }
+    footer { margin-top:46px; }
+    @media (max-width:850px) { .shell { width:min(100% - 32px, 680px); } .hero { padding:72px 0 78px; } }
+    @media (max-width:560px) { .shell { width:min(100% - 24px, 620px); padding-top:16px; } .topbar { padding-bottom:16px; } .hero { padding:58px 0 62px; } .signal-visual { height:240px; } }
   </style>
 </head>
 <body data-page-title="homeTitle" data-i18n-shared="true">
   <main class="shell">
     <header class="topbar">
       <a class="brand" href="/" data-i18n-aria-label="paraBeaconHome"><span class="brand-mark">PB</span><span class="brand-copy"><span class="brand-name">ParaBeacon</span><span class="brand-caption" data-i18n="brandCaption">Flight operations</span></span></a>
-      <nav data-i18n-aria-label="navPrimary"><a href="/live" data-i18n="liveHome">Live map</a><a class="primary" href="/release" data-i18n="liveRelease">Release console</a><button class="language-toggle" type="button" data-language-toggle>中文</button><span data-auth-widget></span></nav>
+      <nav data-i18n-aria-label="navPrimary"><a href="/live" data-i18n="liveHome">Live map</a><a class="primary" href="/release" data-i18n="liveRelease">Release management</a><button class="language-toggle" type="button" data-language-toggle>中文</button><span data-auth-widget></span></nav>
     </header>
 
     <section class="hero" aria-labelledby="hero-title">
       <div class="hero-copy-column">
-        <div class="eyebrow" data-i18n="homeEyebrow">FLIGHT OPERATIONS / PUBLIC SIGNAL</div>
-        <h1 id="hero-title" data-i18n="homeHeroTitle">The signal layer for every flight.</h1>
-        <p class="hero-copy" data-i18n="homeHeroCopy">Turn live positions, pilot visibility, and verified Android releases into one calm operating picture.</p>
-        <div class="hero-actions"><a class="button primary" href="/live"><span data-i18n="homeLiveAction">Open live map</span> <span aria-hidden="true">↗</span></a><a class="button" href="/release" data-i18n="homeReleaseAction">Open release console</a></div>
+        <div class="eyebrow" data-i18n="homeEyebrow">FLIGHT OPERATIONS / ONE CLEAR VIEW</div>
+        <h1 id="hero-title" data-i18n="homeHeroTitle">See the network. Ship with confidence.</h1>
+        <p class="hero-copy" data-i18n="homeHeroCopy">ParaBeacon brings opt-in live tracking, pilot operations, and signed Android releases into one focused workspace.</p>
+        <div class="hero-actions"><a class="button primary" href="/live"><span data-i18n="homeLiveAction">Open live map</span> <span aria-hidden="true">↗</span></a><a class="button" href="/release" data-i18n="homeReleaseAction">Open release management</a></div>
         <div class="hero-note" data-i18n="homeSecureNote">Opt-in sharing · verified releases · one clear view</div>
       </div>
 
       <article class="signal-card" aria-labelledby="signal-title">
-        <div class="signal-head"><div><div class="signal-kicker" data-i18n="homeHeroTag">PUBLIC NETWORK</div><div id="signal-title" class="signal-title" data-i18n="homePanelTitle">Live operations</div><div class="signal-kicker" data-i18n="homePanelCopy">A focused view of the public signal.</div></div><div class="online" data-i18n="homeStatusOnline">SYSTEM ONLINE</div></div>
-        <div class="signal-visual" aria-hidden="true"><div class="crosshair"></div><div class="route route-a"></div><div class="route route-b"></div><div class="route route-c"></div><div class="signal-core">PB</div><div class="signal-coordinates">47.3769° N · 8.5417° E</div><div class="signal-code">PB / LIVE</div></div>
-        <div class="signal-metrics"><div class="metric"><div class="metric-label" data-i18n="homeMetricFreshness">Freshness</div><div class="metric-value" data-i18n="homeMetricFreshnessValue">≤ 90 sec</div></div><div class="metric"><div class="metric-label" data-i18n="homeMetricAccess">Access</div><div class="metric-value" data-i18n="homeMetricAccessValue">Public by choice</div></div><div class="metric"><div class="metric-label" data-i18n="homeMetricDelivery">Delivery</div><div class="metric-value" data-i18n="homeMetricDeliveryValue">Signed builds</div></div></div>
+        <div class="signal-head"><div><div class="signal-kicker" data-i18n="homeHeroTag">PRODUCT OVERVIEW</div><div id="signal-title" class="signal-title" data-i18n="homePanelTitle">One focused workspace</div><div class="signal-kicker" data-i18n="homePanelCopy">Live visibility and trusted distribution, without the noise.</div></div><div class="online" data-i18n="homeStatusOnline">SERVICE READY</div></div>
+        <div class="signal-visual" aria-hidden="true"><div class="crosshair"></div><div class="route route-a"></div><div class="route route-b"></div><div class="route route-c"></div><div class="signal-core">PB</div><div class="signal-coordinates">ILLUSTRATIVE VIEW · NO LIVE DATA</div><div class="signal-code">PB / OVERVIEW</div></div>
+        <div class="signal-metrics"><div class="metric"><div class="metric-label" data-i18n="homeMetricFreshness">Visibility</div><div class="metric-value" data-i18n="homeMetricFreshnessValue">≤ 90 sec</div></div><div class="metric"><div class="metric-label" data-i18n="homeMetricAccess">Sharing</div><div class="metric-value" data-i18n="homeMetricAccessValue">Pilot controlled</div></div><div class="metric"><div class="metric-label" data-i18n="homeMetricDelivery">Releases</div><div class="metric-value" data-i18n="homeMetricDeliveryValue">Signed packages</div></div></div>
         <p class="signal-note" data-i18n="homePanelNote">No noise. Just the signal pilots choose to share.</p>
       </article>
     </section>

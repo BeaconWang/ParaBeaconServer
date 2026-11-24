@@ -25,7 +25,6 @@ type Config struct {
 	TrustedProxies         []string
 	APKStorageDir          string
 	APKPackageName         string
-	APKReleaseAdminToken   string
 	FlightLogStorageDir    string
 	ProfileImageStorageDir string
 	ChatMediaStorageDir    string
@@ -82,7 +81,6 @@ func Load() (Config, error) {
 		TrustedProxies:         splitCSV(os.Getenv("TRUSTED_PROXIES")),
 		APKStorageDir:          env("APK_STORAGE_DIR", "./data/apks"),
 		APKPackageName:         env("APK_PACKAGE_NAME", "com.beacon.parabeacon"),
-		APKReleaseAdminToken:   os.Getenv("APK_RELEASE_ADMIN_TOKEN"),
 		FlightLogStorageDir:    env("FLIGHT_LOG_STORAGE_DIR", "./data/flights"),
 		ProfileImageStorageDir: env("PROFILE_IMAGE_STORAGE_DIR", "./data/profile-images"),
 		ChatMediaStorageDir:    env("CHAT_MEDIA_STORAGE_DIR", "./data/chat-media"),

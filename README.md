@@ -104,11 +104,11 @@ APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./d
 
 Flight synchronization stores one maximally compressed `.flight.zip` file per flight under `FLIGHT_LOG_STORAGE_DIR` (default `./data/flights`). The server generates each archive GUID and stores it with the account/flight metadata in `flight_logs`. Mount this directory on persistent storage in production; the database alone is not sufficient to restore synchronized flight records.
 
-Publishing is disabled unless `APK_RELEASE_ADMIN_TOKEN` contains a secret of at least 32 characters. Keep it in a secret manager; never include it in the app. Upload a signed APK directly as the request body:
+APK release management is available only to the ParaBeacon account whose username is `Beacon` (case-insensitive). Sign in through `POST /api/v1/auth/login`, then send the returned bearer token when publishing. Upload a signed APK directly as the request body:
 
 ```sh
 curl -X POST http://localhost:8080/api/v1/admin/app/releases \
-  -H 'X-Release-Admin-Token: YOUR_RELEASE_ADMIN_TOKEN' \
+  -H 'Authorization: Bearer YOUR_BEACON_ACCESS_TOKEN' \
   -H 'X-APK-Version: 1.2.3' \
   -H 'X-APK-Version-Code: 123' \
   -H 'Content-Type: application/vnd.android.package-archive' \
@@ -119,7 +119,7 @@ The server limits uploads to 512 MiB, verifies the APK archive contains `Android
 
 ### Release management web UI
 
-Open `/release` to use the embedded release management console. Enter the `APK_RELEASE_ADMIN_TOKEN` when publishing or deleting releases; the page keeps it in memory and does not write it to browser storage. The console supports signed APK upload, public release history, SHA-256 inspection, downloads, multi-select deletion, and English/Chinese language switching. APK contents are immutable after publishing, while an administrator may remove a release. Deleting a release permanently unlinks its APK file from server storage and removes its public metadata; the admin-only endpoint is `DELETE /api/v1/admin/app/releases/{version_code}`. The API reports an error rather than treating a failed file removal as a successful deletion.
+Open `/release` to use the embedded release management console. Sign in with the ParaBeacon account whose username is `Beacon` (case-insensitive) to publish or delete releases. The console supports signed APK upload, public release history, SHA-256 inspection, downloads, multi-select deletion, and English/Chinese language switching. APK contents are immutable after publishing, while the Beacon account may remove a release. Deleting a release permanently unlinks its APK file from server storage and removes its public metadata; the account-protected endpoint is `DELETE /api/v1/admin/app/releases/{version_code}`. The API reports an error rather than treating a failed file removal as a successful deletion.
 
 ## Tests and build
 

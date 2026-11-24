@@ -72,17 +72,38 @@
     .download:hover { text-decoration:underline; }
     footer { margin-top:26px; color:var(--muted); font-size:12px; }
     @media (max-width: 780px) { main { width:min(100% - 24px, 620px); padding-top:28px; } header { display:block; } .badge { margin-top:20px; } .grid { grid-template-columns:1fr; } .history { grid-column:auto; overflow:auto; } table { min-width:680px; } }
+    :root { --bg:#07111f; --panel:#102039; --panel-2:#172b45; --line:#2b4666; --muted:#9aacc5; --text:#f3f7ff; --accent:#70e7c0; --accent-2:#8ca7ff; --danger:#ff9cab; }
+    body { background:radial-gradient(circle at 78% -12%, #254c75 0, transparent 34rem), radial-gradient(circle at -8% 60%, #123b53 0, transparent 30rem), var(--bg); }
+    main { width:min(1180px, calc(100% - 48px)); padding:32px 0 70px; }
+    header { align-items:flex-start; margin-bottom:28px; }
+    .eyebrow { letter-spacing:.2em; }
+    h1 { font-size:clamp(36px, 5vw, 64px); }
+    .subtitle { max-width:650px; font-size:17px; line-height:1.6; }
+    .header-actions { gap:8px; }
+    .badge { color:var(--accent); border-color:#70e7c033; background:#0b192bcc; }
+    .grid { gap:20px; }
+    .panel { padding:26px; border-radius:24px; background:linear-gradient(145deg, #172d49ee, #0d192bee); box-shadow:0 28px 80px #0000002e; }
+    .panel-header { margin-bottom:24px; }
+    .panel-header h2 { font-size:21px; }
+    .latest { min-height:250px; }
+    .release-version { font-size:46px; }
+    input, textarea { border-radius:13px; background:#081526; }
+    .notice { line-height:1.5; }
+    .history { padding-bottom:12px; }
+    th, td { padding:15px 11px; }
+    footer { margin-top:30px; }
+    @media (max-width:780px) { main { width:min(100% - 28px, 640px); padding-top:24px; } header { margin-bottom:24px; } .panel { padding:21px; } }
   </style>
 </head>
 <body>
   <main>
     <header>
       <div>
-        <div class="eyebrow">ParaBeacon / Distribution</div>
-        <h1 data-i18n="releaseControlRoom">Release control room</h1>
-        <p class="subtitle" data-i18n="subtitle">Publish signed Android packages, inspect release history, and keep the latest build ready for pilots.</p>
+        <div class="eyebrow">ParaBeacon / Release management</div>
+        <h1 data-i18n="releaseControlRoom">Release management</h1>
+        <p class="subtitle" data-i18n="subtitle">Publish signed Android packages, review their history, and give pilots a clear, verifiable path to the latest build.</p>
       </div>
-      <div class="header-actions"><a class="button secondary" href="/" data-i18n="home">Home</a><a class="button secondary" href="/live" data-i18n="liveTracking">Live map</a><span data-auth-widget></span><button id="language-toggle" class="secondary" type="button" aria-label="Switch language">中文</button><div class="badge" data-i18n="protectedPublisher">Protected publisher</div></div>
+      <div class="header-actions"><a class="button secondary" href="/" data-i18n="home">Home</a><a class="button secondary" href="/live" data-i18n="liveTracking">Live map</a><span data-auth-widget></span><button id="language-toggle" class="secondary" type="button" aria-label="Switch language">中文</button><div class="badge" data-i18n="protectedPublisher">Beacon account access</div></div>
     </header>
 
     <section class="grid">
@@ -92,10 +113,9 @@
       </article>
 
       <article class="panel">
-        <div class="panel-header"><h2 data-i18n="publishAPK">Publish APK</h2></div>
+        <div class="panel-header"><h2 data-i18n="publishAPK">Publish a signed APK</h2></div>
         <form id="publish-form">
-          <label><span data-i18n="adminToken">Admin token (optional for Beacon account)</span><input id="token" type="password" autocomplete="off" minlength="32" data-i18n-placeholder="tokenPlaceholder" placeholder="Enter the server release token"></label>
-          <div class="notice" data-i18n="publishAuthHint">Sign in with the Beacon ParaBeacon Account above to publish without an admin token.</div>
+          <div class="notice" data-i18n="beaconAuthHint">Sign in with the Beacon ParaBeacon Account above to publish and manage releases.</div>
           <div class="row">
             <label><span data-i18n="versionName">Version name</span><input id="version-name" required pattern="[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}" placeholder="1.4.0"></label>
             <label><span data-i18n="versionCode">Version code</span><input id="version-code" required type="number" min="1" max="2100000000" step="1" placeholder="140"></label>
@@ -108,11 +128,11 @@
       </article>
 
       <article class="panel history">
-        <div class="panel-header"><div><h2 data-i18n="releaseHistory">Release history</h2><div class="release-meta" data-i18n="historyHint">Select published builds to remove them from public downloads.</div></div><div class="history-actions"><button id="delete-selected" class="danger" type="button" disabled data-i18n="deleteSelected">Delete selected</button></div></div>
+        <div class="panel-header"><div><h2 data-i18n="releaseHistory">Release history</h2><div class="release-meta" data-i18n="historyHint">Review public versions and remove obsolete builds when authorized.</div></div><div class="history-actions"><button id="delete-selected" class="danger" type="button" disabled data-i18n="deleteSelected">Delete selected</button></div></div>
         <div id="history"><div class="empty" data-i18n="loadingHistory">Loading release history…</div></div>
       </article>
     </section>
-    <footer data-i18n="footer">Tokens stay in this page's memory only and are never written to browser storage.</footer>
+    <footer data-i18n="footer">Release management is available to the Beacon ParaBeacon Account.</footer>
   </main>
   <div id="notes-backdrop" class="notes-backdrop" hidden></div>
   <aside id="notes-drawer" class="notes-drawer" hidden aria-labelledby="notes-title">
@@ -125,10 +145,10 @@
     const $ = (id) => document.getElementById(id);
     const translations = {
       en: {
-        pageTitle: "ParaBeacon Releases", releaseControlRoom: "Release control room", home: "Home", liveTracking: "Live map", subtitle: "Publish signed Android packages, inspect release history, and keep the latest build ready for pilots.", protectedPublisher: "Protected publisher", switchLanguage: "Switch language", latestRelease: "Latest release", refresh: "Refresh", loadingMetadata: "Loading release metadata…", publishAPK: "Publish APK", adminToken: "Admin token (optional for Beacon account)", tokenPlaceholder: "Enter the server release token", publishAuthHint: "Sign in with the Beacon ParaBeacon Account above to publish without an admin token.", versionName: "Version name", versionCode: "Version code", signedAPK: "Signed APK", publishNotes: "Publish notes (Markdown)", notesPlaceholder: "Describe this release in Markdown…", publishRelease: "Publish release", releaseHistory: "Release history", historyHint: "Select published builds to remove them from public downloads.", deleteSelected: "Delete selected", loadingHistory: "Loading release history…", footer: "Tokens stay in this page's memory only and are never written to browser storage.", noRelease: "No release has been published yet.", packageSize: "Package size", downloads: "Downloads", downloadAPK: "Download APK", releaseMeta: "Version code {{code}} · Published {{date}}", noReleases: "No releases found.", select: "Select", published: "Published", size: "Size", notes: "Notes", download: "Download", selectVersion: "Select version {{version}}", closeNotes: "Close notes", noNotes: "No release notes were published.", viewNotes: "View notes", enterTokenDelete: "Enter the admin token before deleting releases.", confirmDelete: "Permanently delete {{count}} release(s)? Their APK files will be removed from the server and can no longer be downloaded.", deleting: "Deleting selected releases…", deleted: "Deleted {{count}} release(s).", uploading: "Uploading and validating APK…", publishedSuccess: "Release published successfully.", requestFailed: "Request failed ({{status}})"
+        pageTitle: "ParaBeacon Release Management", releaseControlRoom: "Release management", home: "Home", liveTracking: "Live map", subtitle: "Publish signed Android packages, review their history, and give pilots a clear, verifiable path to the latest build.", protectedPublisher: "Beacon account access",  switchLanguage: "Switch language", latestRelease: "Latest release", refresh: "Refresh", loadingMetadata: "Loading release metadata…", publishAPK: "Publish a signed APK", beaconAuthHint: "Sign in with the Beacon ParaBeacon Account above to publish and manage releases.", versionName: "Version name", versionCode: "Version code", signedAPK: "Signed APK", publishNotes: "Publish notes (Markdown)", notesPlaceholder: "Describe this release in Markdown…", publishRelease: "Publish release", releaseHistory: "Release history", historyHint: "Review public versions and remove obsolete builds when authorized.", deleteSelected: "Delete selected", loadingHistory: "Loading release history…", footer: "Release management is available to the Beacon ParaBeacon Account.", noRelease: "No release has been published yet.", packageSize: "Package size", downloads: "Downloads", downloadAPK: "Download APK", releaseMeta: "Version code {{code}} · Published {{date}}", noReleases: "No releases found.", select: "Select", published: "Published", size: "Size", notes: "Notes", download: "Download", selectVersion: "Select version {{version}}", closeNotes: "Close notes", noNotes: "No release notes were published.", viewNotes: "View notes", confirmDelete: "Permanently delete {{count}} release(s)? Their APK files will be removed from the server and can no longer be downloaded.", deleting: "Deleting selected releases…", deleted: "Deleted {{count}} release(s).", uploading: "Uploading and validating APK…", publishedSuccess: "Release published successfully.", requestFailed: "Request failed ({{status}})"
       },
       zh: {
-        pageTitle: "ParaBeacon 发布管理", releaseControlRoom: "发布控制台", home: "首页", liveTracking: "实时地图", subtitle: "发布已签名的 Android 安装包，查看版本历史，并为飞行员保持最新构建可用。", protectedPublisher: "受保护的发布者", switchLanguage: "切换语言", latestRelease: "最新版本", refresh: "刷新", loadingMetadata: "正在加载版本信息…", publishAPK: "发布 APK", adminToken: "管理员令牌（Beacon 账户可不填）", tokenPlaceholder: "输入服务器发布令牌", publishAuthHint: "在上方登录 Beacon ParaBeacon 账户后，无需管理员令牌即可发布版本。", versionName: "版本名称", versionCode: "版本号", signedAPK: "已签名 APK", publishNotes: "发布说明（Markdown）", notesPlaceholder: "使用 Markdown 描述此版本…", publishRelease: "发布版本", releaseHistory: "发布历史", historyHint: "选择已发布的构建，将其从公开下载中移除。", deleteSelected: "删除所选版本", loadingHistory: "正在加载发布历史…", footer: "令牌仅保留在当前页面内存中，不会写入浏览器存储。", noRelease: "尚未发布任何版本。", packageSize: "包大小", downloads: "下载次数", downloadAPK: "下载 APK", releaseMeta: "版本号 {{code}} · 发布于 {{date}}", noReleases: "未找到发布版本。", select: "选择", published: "发布时间", size: "大小", notes: "说明", download: "下载", selectVersion: "选择版本 {{version}}", closeNotes: "关闭说明", noNotes: "此版本没有发布说明。", viewNotes: "查看说明", enterTokenDelete: "删除版本前请输入管理员令牌。", confirmDelete: "确定永久删除 {{count}} 个版本吗？对应 APK 将从服务器移除且无法再下载。", deleting: "正在删除所选版本…", deleted: "已删除 {{count}} 个版本。", uploading: "正在上传并验证 APK…", publishedSuccess: "版本发布成功。", requestFailed: "请求失败（{{status}}）"
+        pageTitle: "ParaBeacon 版本管理", releaseControlRoom: "版本管理", home: "首页", liveTracking: "实时地图", subtitle: "发布已签名的 Android 安装包，查看历史，并为飞行员提供清晰、可验证的最新版本。", protectedPublisher: "Beacon 账户权限",  switchLanguage: "切换语言", latestRelease: "最新版本", refresh: "刷新", loadingMetadata: "正在加载版本信息…", publishAPK: "发布已签名 APK", beaconAuthHint: "在上方登录 Beacon ParaBeacon 账户后，即可发布和管理版本。",  versionName: "版本名称", versionCode: "版本号", signedAPK: "已签名 APK", publishNotes: "发布说明（Markdown）", notesPlaceholder: "使用 Markdown 描述此版本…", publishRelease: "发布版本", releaseHistory: "发布历史", historyHint: "查看公开版本，并在获得授权后移除过时构建。",  deleteSelected: "删除所选版本", loadingHistory: "正在加载发布历史…", footer: "版本管理仅对 Beacon ParaBeacon 账户开放。",  noRelease: "尚未发布任何版本。", packageSize: "包大小", downloads: "下载次数", downloadAPK: "下载 APK", releaseMeta: "版本号 {{code}} · 发布于 {{date}}", noReleases: "未找到发布版本。", select: "选择", published: "发布时间", size: "大小", notes: "说明", download: "下载", selectVersion: "选择版本 {{version}}", closeNotes: "关闭说明", noNotes: "此版本没有发布说明。", viewNotes: "查看说明", confirmDelete: "确定永久删除 {{count}} 个版本吗？对应 APK 将从服务器移除且无法再下载。", deleting: "正在删除所选版本…", deleted: "已删除 {{count}} 个版本。", uploading: "正在上传并验证 APK…", publishedSuccess: "版本发布成功。", requestFailed: "请求失败（{{status}}）"
       }
     };
     const storedLanguage = window.localStorage.getItem("parabeacon-language");
@@ -157,8 +177,8 @@
     $("close-notes").addEventListener("click", closeNotes);
     $("notes-backdrop").addEventListener("click", closeNotes);
     document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeNotes(); });
-    $("delete-selected").addEventListener("click", async () => { const codes = selectedCodes(); if (!codes.length) return; if (!$("token").value.trim()) { setNotice(t("enterTokenDelete"), "error"); $("token").focus(); return; } if (!window.confirm(t("confirmDelete", { count: codes.length }))) return; const button = $("delete-selected"); button.disabled = true; setNotice(t("deleting")); try { for (const code of codes) await api(`/api/v1/admin/app/releases/${encodeURIComponent(code)}`, { method: "DELETE", headers: { "X-Release-Admin-Token": $("token").value.trim() } }); setNotice(t("deleted", { count: codes.length }), "success"); await load(); } catch (error) { setNotice(error.message, "error"); updateDeleteButton(); } });
-    $("publish-form").addEventListener("submit", async (event) => { event.preventDefault(); const button = $("publish"); const file = $("apk").files[0]; if (!file) return; button.disabled = true; setNotice(t("uploading")); try { const form = new FormData(); form.append("version_name", $("version-name").value.trim()); form.append("version_code", $("version-code").value); form.append("notes", $("notes").value); form.append("apk", file, file.name); await api("/api/v1/admin/app/releases", { method: "POST", headers: { "X-Release-Admin-Token": $("token").value.trim() }, body: form }); setNotice(t("publishedSuccess"), "success"); $("publish-form").reset(); await load(); } catch (error) { setNotice(error.message, "error"); } finally { button.disabled = false; } });
+    $("delete-selected").addEventListener("click", async () => { const codes = selectedCodes(); if (!codes.length) return; if (!window.confirm(t("confirmDelete", { count: codes.length }))) return; const button = $("delete-selected"); button.disabled = true; setNotice(t("deleting")); try { for (const code of codes) await api(`/api/v1/admin/app/releases/${encodeURIComponent(code)}`, { method: "DELETE" }); setNotice(t("deleted", { count: codes.length }), "success"); await load(); } catch (error) { setNotice(error.message, "error"); updateDeleteButton(); } });
+    $("publish-form").addEventListener("submit", async (event) => { event.preventDefault(); const button = $("publish"); const file = $("apk").files[0]; if (!file) return; button.disabled = true; setNotice(t("uploading")); try { const form = new FormData(); form.append("version_name", $("version-name").value.trim()); form.append("version_code", $("version-code").value); form.append("notes", $("notes").value); form.append("apk", file, file.name); await api("/api/v1/admin/app/releases", { method: "POST", body: form }); setNotice(t("publishedSuccess"), "success"); $("publish-form").reset(); await load(); } catch (error) { setNotice(error.message, "error"); } finally { button.disabled = false; } });
     applyLanguage();
     load();
   </script>
