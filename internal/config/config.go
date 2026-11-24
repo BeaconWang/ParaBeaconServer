@@ -28,6 +28,7 @@ type Config struct {
 	APKReleaseAdminToken   string
 	FlightLogStorageDir    string
 	ProfileImageStorageDir string
+	ChatMediaStorageDir    string
 	COSBucketURL           string
 	COSSecretID            string
 	COSSecretKey           string
@@ -84,6 +85,7 @@ func Load() (Config, error) {
 		APKReleaseAdminToken:   os.Getenv("APK_RELEASE_ADMIN_TOKEN"),
 		FlightLogStorageDir:    env("FLIGHT_LOG_STORAGE_DIR", "./data/flights"),
 		ProfileImageStorageDir: env("PROFILE_IMAGE_STORAGE_DIR", "./data/profile-images"),
+		ChatMediaStorageDir:    env("CHAT_MEDIA_STORAGE_DIR", "./data/chat-media"),
 		COSBucketURL:           cosBucketURL,
 		COSSecretID:            cosSecretID,
 		COSSecretKey:           cosSecretKey,

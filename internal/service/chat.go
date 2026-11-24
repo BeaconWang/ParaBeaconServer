@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,10 @@ const (
 	ChatScopePublic          = "public"
 	ChatScopeChannel         = "channel"
 	ChatScopeDirect          = "direct"
+	ChatKindText             = "text"
+	ChatKindImage            = "image"
+	ChatKindVoice            = "voice"
+	ChatKindLocation         = "location"
 	ChatMaxTextRunes         = 1000
 	ChatLocationStatusMaxAge = 90 * time.Second
 	ChatAccountPageSize      = 30
@@ -35,17 +40,21 @@ var (
 )
 
 type ChatMessage struct {
-	ID                    uuid.UUID `json:"id"`
-	Scope                 string    `json:"scope"`
-	ChannelNumber         *int      `json:"channel_number,omitempty"`
-	SenderPilotNumber     int       `json:"sender_pilot_number"`
-	SenderName            string    `json:"sender_name"`
-	SenderAvatarID        int       `json:"sender_avatar_id"`
-	SenderProfileImageURL string    `json:"sender_profile_image_url,omitempty"`
-	RecipientPilotNumber  *int      `json:"recipient_pilot_number,omitempty"`
-	RecipientID           uuid.UUID `json:"-"`
-	Text                  string    `json:"text"`
-	CreatedAt             time.Time `json:"created_at"`
+	ID                    uuid.UUID  `json:"id"`
+	Scope                 string     `json:"scope"`
+	ChannelNumber         *int       `json:"channel_number,omitempty"`
+	SenderPilotNumber     int        `json:"sender_pilot_number"`
+	SenderName            string     `json:"sender_name"`
+	SenderAvatarID        int        `json:"sender_avatar_id"`
+	SenderProfileImageURL string     `json:"sender_profile_image_url,omitempty"`
+	RecipientPilotNumber  *int       `json:"recipient_pilot_number,omitempty"`
+	RecipientID           uuid.UUID  `json:"-"`
+	Text                  string     `json:"text"`
+	Kind                  string     `json:"kind"`
+	MediaID               *uuid.UUID `json:"media_id,omitempty"`
+	Latitude              *float64   `json:"latitude,omitempty"`
+	Longitude             *float64   `json:"longitude,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
 }
 
 type ChatCursor struct {
@@ -74,10 +83,14 @@ type ChatConversationPage struct {
 }
 
 type SendChatRequest struct {
-	Scope         string `json:"scope"`
-	ChannelNumber int    `json:"channel_number,omitempty"`
-	PilotNumber   int    `json:"pilot_number,omitempty"`
-	Text          string `json:"text"`
+	Scope         string     `json:"scope"`
+	ChannelNumber int        `json:"channel_number,omitempty"`
+	PilotNumber   int        `json:"pilot_number,omitempty"`
+	Text          string     `json:"text"`
+	Kind          string     `json:"kind,omitempty"`
+	MediaID       *uuid.UUID `json:"media_id,omitempty"`
+	Latitude      *float64   `json:"latitude,omitempty"`
+	Longitude     *float64   `json:"longitude,omitempty"`
 }
 
 type ChatService struct {
@@ -109,7 +122,29 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 		return ChatMessage{}, ErrInvalidChatRequest
 	}
 	text := strings.TrimSpace(request.Text)
-	if text == "" || !utf8.ValidString(text) || utf8.RuneCountInString(text) > ChatMaxTextRunes || strings.ContainsAny(text, "\x00\r") {
+	kind := request.Kind
+	if kind == "" {
+		kind = ChatKindText
+	}
+	if !utf8.ValidString(text) || utf8.RuneCountInString(text) > ChatMaxTextRunes || strings.ContainsAny(text, "\x00\r") {
+		return ChatMessage{}, ErrInvalidChatRequest
+	}
+	switch kind {
+	case ChatKindText:
+		if text == "" || request.MediaID != nil || request.Latitude != nil || request.Longitude != nil {
+			return ChatMessage{}, ErrInvalidChatRequest
+		}
+	case ChatKindImage, ChatKindVoice:
+		if request.MediaID == nil || *request.MediaID == uuid.Nil || request.Latitude != nil || request.Longitude != nil {
+			return ChatMessage{}, ErrInvalidChatRequest
+		}
+	case ChatKindLocation:
+		if request.MediaID != nil || request.Latitude == nil || request.Longitude == nil ||
+			math.IsNaN(*request.Latitude) || math.IsInf(*request.Latitude, 0) || *request.Latitude < -90 || *request.Latitude > 90 ||
+			math.IsNaN(*request.Longitude) || math.IsInf(*request.Longitude, 0) || *request.Longitude < -180 || *request.Longitude > 180 {
+			return ChatMessage{}, ErrInvalidChatRequest
+		}
+	default:
 		return ChatMessage{}, ErrInvalidChatRequest
 	}
 	sender, err := s.repository.FindChatUserByID(ctx, senderID)
@@ -129,6 +164,10 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 		SenderAvatarID:        sender.AvatarID,
 		SenderProfileImageURL: sender.ProfileImageURL,
 		Text:                  text,
+		Kind:                  kind,
+		MediaID:               request.MediaID,
+		Latitude:              request.Latitude,
+		Longitude:             request.Longitude,
 		CreatedAt:             time.Now().UTC(),
 	}
 	switch request.Scope {
@@ -186,10 +225,55 @@ func (s *ChatService) Send(ctx context.Context, senderID uuid.UUID, request Send
 			return ChatMessage{}, err
 		}
 	}
-	if err := s.repository.CreateChatMessage(ctx, message); err != nil {
+	if message.MediaID != nil {
+		mediaRepository, ok := s.repository.(interface {
+			CreateChatMessageWithMedia(context.Context, *model.ChatMessage) error
+		})
+		if !ok {
+			return ChatMessage{}, ErrInvalidChatRequest
+		}
+		if err := mediaRepository.CreateChatMessageWithMedia(ctx, message); err != nil {
+			if errors.Is(err, repository.ErrInvalidChatMediaReference) {
+				return ChatMessage{}, ErrInvalidChatRequest
+			}
+			return ChatMessage{}, err
+		}
+	} else if err := s.repository.CreateChatMessage(ctx, message); err != nil {
 		return ChatMessage{}, err
 	}
 	return chatMessageFromModel(message), nil
+}
+
+func (s *ChatService) ValidateMediaTarget(ctx context.Context, senderID uuid.UUID, scope string, channelNumber, pilotNumber int) (*uuid.UUID, error) {
+	switch scope {
+	case ChatScopePublic:
+		if channelNumber != 0 || pilotNumber != 0 {
+			return nil, ErrInvalidChatRequest
+		}
+		if _, err := s.repository.FindChatUserByID(ctx, senderID); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	case ChatScopeChannel:
+		if pilotNumber != 0 {
+			return nil, ErrInvalidChatRequest
+		}
+		if err := s.ValidateChannel(ctx, senderID, channelNumber); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	case ChatScopeDirect:
+		if channelNumber != 0 {
+			return nil, ErrInvalidChatRequest
+		}
+		peerID, err := s.SubscribePeer(ctx, senderID, pilotNumber)
+		if err != nil {
+			return nil, err
+		}
+		return &peerID, nil
+	default:
+		return nil, ErrInvalidChatRequest
+	}
 }
 
 func (s *ChatService) SearchAccounts(ctx context.Context, requesterID uuid.UUID, rawQuery, rawCursor string, limit int) (ChatAccountPage, error) {
@@ -436,6 +520,10 @@ func dereferenceUUID(value *uuid.UUID) uuid.UUID {
 }
 
 func chatMessageFromModel(message *model.ChatMessage) ChatMessage {
+	kind := message.Kind
+	if kind == "" {
+		kind = ChatKindText
+	}
 	return ChatMessage{
 		ID:                    message.ID,
 		Scope:                 message.Scope,
@@ -447,6 +535,10 @@ func chatMessageFromModel(message *model.ChatMessage) ChatMessage {
 		RecipientPilotNumber:  message.RecipientPilotNumber,
 		RecipientID:           dereferenceUUID(message.RecipientID),
 		Text:                  message.Text,
+		Kind:                  kind,
+		MediaID:               message.MediaID,
+		Latitude:              message.Latitude,
+		Longitude:             message.Longitude,
 		CreatedAt:             message.CreatedAt.UTC(),
 	}
 }

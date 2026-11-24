@@ -76,10 +76,18 @@ func run() error {
 	liveHub := realtime.NewHub(redisClient, flightLifecycle, logger)
 	liveHub.Start()
 	defer liveHub.Close()
-	chatHub := realtime.NewChatHub(redisClient, service.NewChatService(repository.NewChatRepository(db)), logger)
+	chatRepository := repository.NewChatRepository(db)
+	chatService := service.NewChatService(chatRepository)
+	chatMediaStorage, err := service.NewChatMediaStorage(cfg.ChatMediaStorageDir)
+	if err != nil {
+		return fmt.Errorf("configure chat media storage: %w", err)
+	}
+	chatMediaService := service.NewChatMediaService(chatRepository, chatService, chatMediaStorage)
+	go chatMediaService.RunCleanup(ctx, logger)
+	chatHub := realtime.NewChatHub(redisClient, chatService, logger)
 	chatHub.Start()
 	defer chatHub.Close()
-	engine, err := router.New(cfg, db, authService, tokens, liveHub, chatHub)
+	engine, err := router.New(cfg, db, authService, tokens, liveHub, chatHub, chatMediaService)
 	if err != nil {
 		return fmt.Errorf("configure HTTP routes: %w", err)
 	}

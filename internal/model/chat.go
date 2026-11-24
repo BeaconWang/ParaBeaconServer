@@ -18,5 +18,9 @@ type ChatMessage struct {
 	RecipientID           *uuid.UUID `gorm:"type:uuid;index:idx_chat_recipient_created,priority:1;index:idx_chat_direct_unread,priority:2" json:"-"`
 	RecipientPilotNumber  *int       `gorm:"index:idx_chat_recipient_created,priority:2" json:"recipient_pilot_number,omitempty"`
 	Text                  string     `gorm:"type:text;not null" json:"text"`
+	Kind                  string     `gorm:"size:16;not null;default:'text'" json:"kind"`
+	MediaID               *uuid.UUID `gorm:"type:uuid;uniqueIndex" json:"media_id,omitempty"`
+	Latitude              *float64   `json:"latitude,omitempty"`
+	Longitude             *float64   `json:"longitude,omitempty"`
 	CreatedAt             time.Time  `gorm:"not null;index:idx_chat_channel_created,priority:3;index:idx_chat_sender_created,priority:3;index:idx_chat_recipient_created,priority:3;index:idx_chat_direct_unread,priority:4" json:"created_at"`
 }

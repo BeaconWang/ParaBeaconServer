@@ -17,13 +17,9 @@ import (
 	"gorm.io/gorm"
 )
 
-func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, tokens *utils.TokenManager, liveHub *realtime.Hub, chatHubs ...*realtime.ChatHub) (*gin.Engine, error) {
+func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, tokens *utils.TokenManager, liveHub *realtime.Hub, chatHub *realtime.ChatHub, chatMediaServices ...*service.ChatMediaService) (*gin.Engine, error) {
 	if liveHub == nil {
 		liveHub = realtime.NewHub(nil, nil, nil)
-	}
-	var chatHub *realtime.ChatHub
-	if len(chatHubs) > 0 {
-		chatHub = chatHubs[0]
 	}
 	if chatHub == nil {
 		chatHub = realtime.NewChatHub(nil, nil, nil)
@@ -79,8 +75,21 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	trackingRepo := repository.NewTrackingRepository(db)
 	trackingService := service.NewTrackingService(trackingRepo)
 	trackingHandler := handler.NewTrackingHandler(trackingService, liveHub)
-	chatService := service.NewChatService(repository.NewChatRepository(db))
+	chatRepository := repository.NewChatRepository(db)
+	chatService := service.NewChatService(chatRepository)
 	chatHandler := handler.NewChatHandler(chatService, chatHub)
+	var chatMediaService *service.ChatMediaService
+	if len(chatMediaServices) > 0 {
+		chatMediaService = chatMediaServices[0]
+	}
+	if chatMediaService == nil {
+		chatMediaStorage, err := service.NewChatMediaStorage(cfg.ChatMediaStorageDir)
+		if err != nil {
+			return nil, err
+		}
+		chatMediaService = service.NewChatMediaService(chatRepository, chatService, chatMediaStorage)
+	}
+	chatMediaHandler := handler.NewChatMediaHandler(chatMediaService)
 	flightLogRepo := repository.NewFlightLogRepository(db)
 	flightArchiveStorage, err := service.NewFlightArchiveStorage(cfg.FlightLogStorageDir)
 	if err != nil {
@@ -151,6 +160,8 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.GET("/landing-points", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), landingPointHandler.List)
 		protected.POST("/landing-points", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), landingPointHandler.Import)
 		protected.GET("/chat/messages", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), chatHandler.ListMessages)
+		protected.POST("/chat/media", middleware.NewFixedWindowLimiter(20, time.Hour, 10000).Middleware(), chatMediaHandler.Upload)
+		protected.GET("/chat/media/:media_id", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), chatMediaHandler.Get)
 		protected.GET("/chat/accounts", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), chatHandler.SearchAccounts)
 		protected.GET("/chat/conversations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), chatHandler.ListConversations)
 		protected.PUT("/chat/conversations/:pilot_number/pin", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), chatHandler.SetConversationPinned)

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
 	"strings"
 	"testing"
@@ -22,6 +23,7 @@ type chatReadPair struct {
 type memoryChatRepository struct {
 	users          map[uuid.UUID]repository.ChatUser
 	messages       []model.ChatMessage
+	media          map[uuid.UUID]model.ChatMedia
 	locationStatus map[int]bool
 	pins           map[uuid.UUID]map[uuid.UUID]time.Time
 	readStates     map[chatReadPair]time.Time
@@ -207,6 +209,62 @@ func (r *memoryChatRepository) CreateChatMessage(_ context.Context, message *mod
 	copy := *message
 	r.messages = append(r.messages, copy)
 	return nil
+}
+
+func (r *memoryChatRepository) CreateChatMessageWithMedia(ctx context.Context, message *model.ChatMessage) error {
+	mediaID := *message.MediaID
+	media, ok := r.media[mediaID]
+	channelMatches := media.ChannelNumber == nil && message.ChannelNumber == nil ||
+		media.ChannelNumber != nil && message.ChannelNumber != nil && *media.ChannelNumber == *message.ChannelNumber
+	recipientMatches := media.RecipientID == nil && message.RecipientID == nil ||
+		media.RecipientID != nil && message.RecipientID != nil && *media.RecipientID == *message.RecipientID
+	if !ok || !media.ExpiresAt.After(time.Now()) || media.SenderID != message.SenderID ||
+		media.Kind != message.Kind || media.Scope != message.Scope || media.MessageID != nil ||
+		!channelMatches || !recipientMatches {
+		return ErrInvalidChatRequest
+	}
+	media.MessageID = &message.ID
+	r.media[mediaID] = media
+	return r.CreateChatMessage(ctx, message)
+}
+
+func (r *memoryChatRepository) CreateChatMedia(_ context.Context, media *model.ChatMedia) error {
+	if r.media == nil {
+		r.media = make(map[uuid.UUID]model.ChatMedia)
+	}
+	r.media[media.ID] = *media
+	return nil
+}
+
+func (r *memoryChatRepository) FindChatMediaForUser(_ context.Context, mediaID, requesterID uuid.UUID) (*model.ChatMedia, error) {
+	media, ok := r.media[mediaID]
+	if !ok || media.MessageID == nil {
+		return nil, gorm.ErrRecordNotFound
+	}
+	viewer, viewerExists := r.users[requesterID]
+	allowed := viewerExists && media.Scope == ChatScopePublic
+	switch media.Scope {
+	case ChatScopeChannel:
+		allowed = viewerExists && media.ChannelNumber != nil && viewer.ChannelNumber == *media.ChannelNumber
+	case ChatScopeDirect:
+		allowed = media.SenderID == requesterID || media.RecipientID != nil && *media.RecipientID == requesterID
+	}
+	if !allowed {
+		return nil, gorm.ErrRecordNotFound
+	}
+	copy := media
+	return &copy, nil
+}
+
+func (r *memoryChatRepository) DeleteExpiredChatMedia(_ context.Context, before time.Time) ([]model.ChatMedia, error) {
+	var expired []model.ChatMedia
+	for id, media := range r.media {
+		if media.MessageID == nil && !media.ExpiresAt.After(before) {
+			expired = append(expired, media)
+			delete(r.media, id)
+		}
+	}
+	return expired, nil
 }
 
 func (r *memoryChatRepository) ListPublicChat(_ context.Context, before time.Time, beforeID uuid.UUID, limit int) ([]model.ChatMessage, error) {
@@ -604,5 +662,59 @@ func TestChatRejectsChannelZeroAndRateLimitsSender(t *testing.T) {
 	}
 	if _, err := chat.Send(ctx, pilotID, SendChatRequest{Scope: ChatScopePublic, Text: "too fast"}); !errors.Is(err, ErrChatRateLimited) {
 		t.Fatalf("rapid send error = %v, want rate limited", err)
+	}
+}
+
+func TestChatSendsImageVoiceAndValidatedLocationMessages(t *testing.T) {
+	ctx := context.Background()
+	aliceID, bobID := uuid.New(), uuid.New()
+	imageID, voiceID := uuid.New(), uuid.New()
+	bobPilot := 234567
+	repository := &memoryChatRepository{
+		users: map[uuid.UUID]repository.ChatUser{
+			aliceID: {ID: aliceID, PilotNumber: 123456, ChannelNumber: 345678, Username: "alice"},
+			bobID:   {ID: bobID, PilotNumber: bobPilot, ChannelNumber: 456789, Username: "bob"},
+		},
+		media: map[uuid.UUID]model.ChatMedia{
+			imageID: {
+				ID: imageID, SenderID: aliceID, Scope: ChatScopeDirect,
+				RecipientID: &bobID, Kind: ChatKindImage, ExpiresAt: time.Now().Add(time.Hour),
+			},
+			voiceID: {
+				ID: voiceID, SenderID: aliceID, Scope: ChatScopeDirect,
+				RecipientID: &bobID, Kind: ChatKindVoice, ExpiresAt: time.Now().Add(time.Hour),
+			},
+		},
+	}
+	chat := NewChatService(repository)
+	imageMessage, err := chat.Send(ctx, aliceID, SendChatRequest{
+		Scope: ChatScopeDirect, PilotNumber: bobPilot, Kind: ChatKindImage, MediaID: &imageID,
+	})
+	if err != nil || imageMessage.Kind != ChatKindImage || imageMessage.MediaID == nil || *imageMessage.MediaID != imageID {
+		t.Fatalf("send image = %#v, err=%v", imageMessage, err)
+	}
+	chat.lastSent[aliceID] = time.Now().Add(-time.Second)
+	voiceMessage, err := chat.Send(ctx, aliceID, SendChatRequest{
+		Scope: ChatScopeDirect, PilotNumber: bobPilot, Kind: ChatKindVoice, MediaID: &voiceID,
+	})
+	if err != nil || voiceMessage.Kind != ChatKindVoice || voiceMessage.MediaID == nil || *voiceMessage.MediaID != voiceID {
+		t.Fatalf("send voice = %#v, err=%v", voiceMessage, err)
+	}
+	latitude, longitude := 37.4219999, -122.0840575
+	chat.lastSent[aliceID] = time.Now().Add(-time.Second)
+	locationMessage, err := chat.Send(ctx, aliceID, SendChatRequest{
+		Scope: ChatScopeDirect, PilotNumber: bobPilot, Kind: ChatKindLocation,
+		Latitude: &latitude, Longitude: &longitude,
+	})
+	if err != nil || locationMessage.Kind != ChatKindLocation || locationMessage.Latitude == nil ||
+		*locationMessage.Latitude != latitude || locationMessage.Longitude == nil || *locationMessage.Longitude != longitude {
+		t.Fatalf("send location = %#v, err=%v", locationMessage, err)
+	}
+	badLatitude := math.NaN()
+	if _, err := chat.Send(ctx, aliceID, SendChatRequest{
+		Scope: ChatScopeDirect, PilotNumber: bobPilot, Kind: ChatKindLocation,
+		Latitude: &badLatitude, Longitude: &longitude,
+	}); !errors.Is(err, ErrInvalidChatRequest) {
+		t.Fatalf("send NaN location error = %v, want invalid request", err)
 	}
 }

@@ -11,10 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -78,11 +76,15 @@ type chatEnvelope struct {
 }
 
 type chatClientMessage struct {
-	Type          string `json:"type"`
-	Scope         string `json:"scope,omitempty"`
-	ChannelNumber int    `json:"channel_number,omitempty"`
-	PilotNumber   int    `json:"pilot_number,omitempty"`
-	Text          string `json:"text,omitempty"`
+	Type          string     `json:"type"`
+	Scope         string     `json:"scope,omitempty"`
+	ChannelNumber int        `json:"channel_number,omitempty"`
+	PilotNumber   int        `json:"pilot_number,omitempty"`
+	Text          string     `json:"text,omitempty"`
+	Kind          string     `json:"kind,omitempty"`
+	MediaID       *uuid.UUID `json:"media_id,omitempty"`
+	Latitude      *float64   `json:"latitude,omitempty"`
+	Longitude     *float64   `json:"longitude,omitempty"`
 }
 
 type chatServerMessage struct {
@@ -636,11 +638,6 @@ func (c *chatClient) subscribe(incoming chatClientMessage) {
 }
 
 func (c *chatClient) sendChat(incoming chatClientMessage) {
-	text := strings.TrimSpace(incoming.Text)
-	if text == "" || !utf8.ValidString(text) || utf8.RuneCountInString(text) > service.ChatMaxTextRunes {
-		c.sendError("invalid_message")
-		return
-	}
 	now := time.Now()
 	c.hub.mu.Lock()
 	if !c.lastSentAt.IsZero() && now.Sub(c.lastSentAt) < 750*time.Millisecond {
@@ -653,7 +650,9 @@ func (c *chatClient) sendChat(incoming chatClientMessage) {
 	ctx, cancel := context.WithTimeout(c.hub.ctx, 5*time.Second)
 	message, err := c.hub.chat.Send(ctx, c.userID, service.SendChatRequest{
 		Scope: incoming.Scope, ChannelNumber: incoming.ChannelNumber,
-		PilotNumber: incoming.PilotNumber, Text: text,
+		PilotNumber: incoming.PilotNumber, Text: incoming.Text,
+		Kind: incoming.Kind, MediaID: incoming.MediaID,
+		Latitude: incoming.Latitude, Longitude: incoming.Longitude,
 	})
 	cancel()
 	if err != nil {

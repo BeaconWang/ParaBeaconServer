@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -12,6 +13,8 @@ import (
 )
 
 const ChatPageSize = 50
+
+var ErrInvalidChatMediaReference = errors.New("invalid chat media reference")
 
 type ChatUser struct {
 	ID              uuid.UUID
@@ -59,6 +62,13 @@ type ChatRepository interface {
 	ListChannelChat(context.Context, int, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
 	ListDirectChat(context.Context, uuid.UUID, uuid.UUID, time.Time, uuid.UUID, int) ([]model.ChatMessage, error)
 	HasFreshPublicLocation(context.Context, int, time.Time, time.Time) (bool, error)
+}
+
+type ChatMediaRepository interface {
+	CreateChatMedia(context.Context, *model.ChatMedia) error
+	CreateChatMessageWithMedia(context.Context, *model.ChatMessage) error
+	FindChatMediaForUser(context.Context, uuid.UUID, uuid.UUID) (*model.ChatMedia, error)
+	DeleteExpiredChatMedia(context.Context, time.Time) ([]model.ChatMedia, error)
 }
 
 type GormChatRepository struct {
@@ -256,6 +266,96 @@ func (r *GormChatRepository) CreateChatMessage(ctx context.Context, message *mod
 		return fmt.Errorf("persist chat message: %w", err)
 	}
 	return nil
+}
+
+func (r *GormChatRepository) CreateChatMessageWithMedia(ctx context.Context, message *model.ChatMessage) error {
+	if message == nil || message.MediaID == nil || *message.MediaID == uuid.Nil {
+		return ErrInvalidChatMediaReference
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var media model.ChatMedia
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", *message.MediaID).Take(&media).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrInvalidChatMediaReference
+		}
+		if err != nil {
+			return fmt.Errorf("find staged chat media: %w", err)
+		}
+		if media.MessageID != nil || !media.ExpiresAt.After(time.Now().UTC()) ||
+			media.SenderID != message.SenderID || media.Scope != message.Scope || media.Kind != message.Kind ||
+			!sameOptionalInt(media.ChannelNumber, message.ChannelNumber) || !sameOptionalUUID(media.RecipientID, message.RecipientID) {
+			return ErrInvalidChatMediaReference
+		}
+		if err := tx.Create(message).Error; err != nil {
+			return fmt.Errorf("persist chat message: %w", err)
+		}
+		result := tx.Model(&model.ChatMedia{}).
+			Where("id = ? AND message_id IS NULL AND expires_at > ?", media.ID, time.Now().UTC()).
+			Update("message_id", message.ID)
+		if result.Error != nil {
+			return fmt.Errorf("attach media to chat message: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrInvalidChatMediaReference
+		}
+		return nil
+	})
+}
+
+func sameOptionalInt(left, right *int) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func sameOptionalUUID(left, right *uuid.UUID) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
+}
+
+func (r *GormChatRepository) CreateChatMedia(ctx context.Context, media *model.ChatMedia) error {
+	if media == nil || media.ID == uuid.Nil || media.SenderID == uuid.Nil {
+		return fmt.Errorf("invalid chat media")
+	}
+	if err := r.db.WithContext(ctx).Create(media).Error; err != nil {
+		return fmt.Errorf("persist staged chat media: %w", err)
+	}
+	return nil
+}
+
+func (r *GormChatRepository) FindChatMediaForUser(ctx context.Context, mediaID, requesterID uuid.UUID) (*model.ChatMedia, error) {
+	var media model.ChatMedia
+	err := r.db.WithContext(ctx).
+		Where("id = ? AND message_id IS NOT NULL", mediaID).
+		Where(`(scope = ? OR
+			(scope = ? AND EXISTS (SELECT 1 FROM users AS viewer WHERE viewer.id = ? AND viewer.channel_number = chat_media.channel_number)) OR
+			(scope = ? AND (sender_id = ? OR recipient_id = ?)))`,
+			"public", "channel", requesterID, "direct", requesterID, requesterID).
+		Take(&media).Error
+	if err != nil {
+		return nil, err
+	}
+	return &media, nil
+}
+
+func (r *GormChatRepository) DeleteExpiredChatMedia(ctx context.Context, before time.Time) ([]model.ChatMedia, error) {
+	var expired []model.ChatMedia
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+			Where("message_id IS NULL AND expires_at <= ?", before.UTC()).
+			Find(&expired).Error; err != nil {
+			return err
+		}
+		if len(expired) == 0 {
+			return nil
+		}
+		ids := make([]uuid.UUID, len(expired))
+		for i := range expired {
+			ids[i] = expired[i].ID
+		}
+		return tx.Where("id IN ? AND message_id IS NULL", ids).Delete(&model.ChatMedia{}).Error
+	})
+	if err != nil {
+		return nil, fmt.Errorf("delete expired staged chat media: %w", err)
+	}
+	return expired, nil
 }
 
 func (r *GormChatRepository) ListPublicChat(ctx context.Context, before time.Time, beforeID uuid.UUID, limit int) ([]model.ChatMessage, error) {

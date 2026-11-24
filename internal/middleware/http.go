@@ -17,7 +17,9 @@ func HTTPHardening(allowedOrigins []string) gin.HandlerFunc {
 		c.Header("X-Frame-Options", "DENY")
 		c.Header("Referrer-Policy", "no-referrer")
 		c.Header("Cache-Control", "no-store")
-		if !(c.Request.Method == http.MethodPost && c.Request.URL.Path == "/api/v1/admin/app/releases") {
+		isLargeUpload := c.Request.Method == http.MethodPost &&
+			(c.Request.URL.Path == "/api/v1/admin/app/releases" || c.Request.URL.Path == "/api/v1/chat/media")
+		if !isLargeUpload {
 			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
 		}
 
