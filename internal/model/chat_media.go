@@ -17,5 +17,5 @@ type ChatMedia struct {
 	StorageKey    string     `gorm:"size:64;not null;uniqueIndex" json:"-"`
 	MessageID     *uuid.UUID `gorm:"type:uuid;uniqueIndex" json:"-"`
 	ExpiresAt     time.Time  `gorm:"not null;index" json:"-"`
-	CreatedAt     time.Time  `gorm:"not null" json:"-"`
+	CreatedAt     time.Time  `gorm:"not null;index" json:"-"`
 }

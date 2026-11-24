@@ -366,6 +366,59 @@ func (r *GormChatRepository) DeleteExpiredChatMedia(ctx context.Context, before 
 	return expired, nil
 }
 
+func (r *GormChatRepository) FindChatHistoryCleanupBatch(ctx context.Context, before time.Time, limit int) ([]model.ChatMessage, []model.ChatMedia, error) {
+	if limit <= 0 {
+		return nil, nil, fmt.Errorf("chat cleanup batch size must be positive")
+	}
+	before = before.UTC()
+	messages := make([]model.ChatMessage, 0, limit)
+	if err := r.db.WithContext(ctx).
+		Where("created_at < ?", before).
+		Order("created_at ASC, id ASC").
+		Limit(limit).
+		Find(&messages).Error; err != nil {
+		return nil, nil, fmt.Errorf("find expired chat messages: %w", err)
+	}
+	media := make([]model.ChatMedia, 0, limit)
+	mediaQuery := r.db.WithContext(ctx).
+		Where(`created_at < ? AND (message_id IS NULL OR NOT EXISTS (
+			SELECT 1 FROM chat_messages AS message
+			WHERE message.id = chat_media.message_id AND message.created_at >= ?
+		))`, before, before)
+	if len(messages) > 0 {
+		messageIDs := make([]uuid.UUID, len(messages))
+		for i := range messages {
+			messageIDs[i] = messages[i].ID
+		}
+		mediaQuery = mediaQuery.Or("message_id IN ?", messageIDs)
+	}
+	if err := mediaQuery.Order("created_at ASC, id ASC").Limit(limit).Find(&media).Error; err != nil {
+		return nil, nil, fmt.Errorf("find expired chat media: %w", err)
+	}
+	return messages, media, nil
+}
+
+func (r *GormChatRepository) DeleteChatHistoryCleanupBatch(ctx context.Context, before time.Time, messageIDs, mediaIDs []uuid.UUID) error {
+	before = before.UTC()
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if len(mediaIDs) > 0 {
+			mediaQuery := tx.Where("id IN ? AND created_at < ? AND (message_id IS NULL OR NOT EXISTS (\n\t\t\t\tSELECT 1 FROM chat_messages AS message\n\t\t\t\tWHERE message.id = chat_media.message_id AND message.created_at >= ?\n\t\t\t))", mediaIDs, before, before)
+			if len(messageIDs) > 0 {
+				mediaQuery = mediaQuery.Or("id IN ? AND message_id IN ?", mediaIDs, messageIDs)
+			}
+			if err := mediaQuery.Delete(&model.ChatMedia{}).Error; err != nil {
+				return fmt.Errorf("delete expired chat media: %w", err)
+			}
+		}
+		if len(messageIDs) > 0 {
+			if err := tx.Where("id IN ? AND created_at < ?", messageIDs, before).Delete(&model.ChatMessage{}).Error; err != nil {
+				return fmt.Errorf("delete expired chat messages: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
 func (r *GormChatRepository) ListPublicChat(ctx context.Context, before time.Time, beforeID uuid.UUID, limit int) ([]model.ChatMessage, error) {
 	return r.list(ctx, r.db.WithContext(ctx).Where("scope = ?", "public"), before, beforeID, limit)
 }

@@ -84,6 +84,8 @@ func run() error {
 	}
 	chatMediaService := service.NewChatMediaService(chatRepository, chatService, chatMediaStorage)
 	go chatMediaService.RunCleanup(ctx, logger)
+	chatHistoryCleanup := service.NewChatHistoryCleanupService(chatRepository, chatMediaStorage)
+	go chatHistoryCleanup.RunDailyCleanup(ctx, logger)
 	chatHub := realtime.NewChatHub(redisClient, chatService, logger)
 	chatHub.Start()
 	defer chatHub.Close()
