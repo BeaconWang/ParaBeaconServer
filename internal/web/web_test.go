@@ -24,6 +24,20 @@ func TestHandlerDisablesCaching(t *testing.T) {
 	}
 }
 
+func TestReleasePageSupportsBeaconAccountPublishing(t *testing.T) {
+	request := httptest.NewRequest("GET", "/release", nil)
+	response := httptest.NewRecorder()
+	Handler().ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status = %d", response.Code)
+	}
+	for _, marker := range []string{"data-auth-widget", "publishAuthHint", "ParaBeaconAuth.authHeaders"} {
+		if !strings.Contains(response.Body.String(), marker) {
+			t.Errorf("release page does not contain %q", marker)
+		}
+	}
+}
+
 func TestLiveHandlerServesLiveMapWithSecurityPolicy(t *testing.T) {
 	request := httptest.NewRequest("GET", "/live", nil)
 	response := httptest.NewRecorder()

@@ -128,7 +128,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		v1.GET("/app/releases/:version_code/download", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), appReleaseHandler.Download)
 		v1.GET("/admin/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.List)
 		v1.DELETE("/admin/app/releases/:version_code", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Delete)
-		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdmin(cfg.APKReleaseAdminToken), appReleaseHandler.Publish)
+		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), middleware.RequireReleaseAdminOrBeaconAccount(cfg.APKReleaseAdminToken, tokens, repository.NewUserRepository(db), repository.NewRefreshTokenRepository(db)), appReleaseHandler.Publish)
 		v1.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), trackingHandler.ListPublicLocations)
 		v1.GET("/profile-images/:image_key", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), profileImageHandler.Get)
 		v1.POST("/metrics/session", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), sessionMetricsHandler.Ingest)
