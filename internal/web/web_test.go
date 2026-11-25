@@ -31,7 +31,7 @@ func TestReleasePageSupportsBeaconAccountPublishing(t *testing.T) {
 	if response.Code != 200 {
 		t.Fatalf("status = %d", response.Code)
 	}
-	for _, marker := range []string{"data-auth-widget", "beaconAuthHint", "ParaBeaconAuth.authHeaders"} {
+	for _, marker := range []string{"data-auth-widget", "beaconAuthHint", "fullAccess", "/api/v1/admin/app/releases", "ParaBeaconAuth.authHeaders"} {
 		if !strings.Contains(response.Body.String(), marker) {
 			t.Errorf("release page does not contain %q", marker)
 		}

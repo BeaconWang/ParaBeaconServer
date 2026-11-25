@@ -145,6 +145,6 @@
     window.addEventListener("parabeacon-language-changed", update);
   };
 
-  window.ParaBeaconAuth = { getToken, authHeaders, init, logout: () => { clearSession(); emitChange(); } };
+  window.ParaBeaconAuth = { getToken, getUser, authHeaders, init, logout: () => { clearSession(); emitChange(); } };
   document.addEventListener("DOMContentLoaded", () => document.querySelectorAll("[data-auth-widget]").forEach(init));
 })();

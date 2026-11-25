@@ -66,6 +66,30 @@ func TestRequireBeaconAccountRejectsOtherAccounts(t *testing.T) {
 	}
 }
 
+func TestRequireBeaconAccountProvidesAccessToAllReleaseOperations(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID := uuid.New()
+	tokens := utils.NewTokenManager("test-jwt-secret-with-at-least-32-bytes", "test-issuer", time.Hour)
+	token, _, err := tokens.Issue(userID)
+	if err != nil {
+		t.Fatalf("issue token: %v", err)
+	}
+	middleware := RequireBeaconAccount(tokens, testAccountLookup{account: &model.User{ID: userID, Username: "BEACON"}})
+	engine := gin.New()
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+		engine.Handle(method, "/admin/releases", middleware, func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	}
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete} {
+		request := httptest.NewRequest(method, "/admin/releases", nil)
+		request.Header.Set("Authorization", "Bearer "+token)
+		response := httptest.NewRecorder()
+		engine.ServeHTTP(response, request)
+		if response.Code != http.StatusNoContent {
+			t.Errorf("%s status = %d, want %d", method, response.Code, http.StatusNoContent)
+		}
+	}
+}
+
 func TestRequireBeaconAccountRejectsMissingAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	tokens := utils.NewTokenManager("test-jwt-secret-with-at-least-32-bytes", "test-issuer", time.Hour)
