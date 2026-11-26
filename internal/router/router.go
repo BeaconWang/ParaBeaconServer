@@ -107,6 +107,9 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	landingPointRepo := repository.NewLandingPointRepository(db)
 	landingPointService := service.NewLandingPointService(landingPointRepo)
 	landingPointHandler := handler.NewLandingPointHandler(landingPointService)
+	competitionTaskRepository := repository.NewCompetitionTaskRepository(db)
+	competitionTaskService := service.NewCompetitionTaskService(competitionTaskRepository)
+	competitionTaskHandler := handler.NewCompetitionTaskHandler(competitionTaskService)
 	appReleaseRepository := repository.NewAppReleaseRepository(db)
 	appReleaseService, err := service.NewAppReleaseService(
 		appReleaseRepository,
@@ -150,7 +153,6 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		v1.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), trackingHandler.ListPublicLocations)
 		v1.GET("/profile-images/:image_key", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), profileImageHandler.Get)
 		v1.POST("/metrics/session", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), sessionMetricsHandler.Ingest)
-
 		protected := v1.Group("")
 		protected.Use(middleware.RequireAuth(tokens, repository.NewRefreshTokenRepository(db)))
 		protected.GET("/user/profile", userHandler.Profile)
@@ -178,6 +180,8 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.POST("/flight-logs/syncs/:sync_id/commit", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), flightLogHandler.CommitSync)
 		protected.GET("/landing-points", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), landingPointHandler.List)
 		protected.POST("/landing-points", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), landingPointHandler.Import)
+		protected.GET("/competition-tasks", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), competitionTaskHandler.List)
+		protected.PUT("/user/competition-task", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), competitionTaskHandler.Replace)
 		protected.GET("/chat/messages", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), chatHandler.ListMessages)
 		protected.POST("/chat/media", middleware.NewFixedWindowLimiter(20, time.Hour, 10000).Middleware(), chatMediaHandler.Upload)
 		protected.GET("/chat/media/:media_id", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), chatMediaHandler.Get)

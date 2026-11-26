@@ -35,7 +35,7 @@ func Open(ctx context.Context, dsn string) (*gorm.DB, error) {
 	if err := sqlDB.PingContext(pingCtx); err != nil {
 		return nil, fmt.Errorf("ping PostgreSQL: %w", err)
 	}
-	if err := db.WithContext(ctx).AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.LiveTrackSession{}, &model.LiveTrackPoint{}, &model.FlightLog{}, &model.FlightLogSync{}, &model.FlightLogSyncBatch{}, &model.FlightLogSyncRecord{}, &model.LandingPoint{}, &model.LandingPointSettings{}, &model.AppRelease{}, &model.ChatMessage{}, &model.ChatMedia{}, &model.ChatConversationPin{}, &model.ChatConversationRead{}, &model.SessionMetricEvent{}, &model.SessionMetricRuntime{}, &model.SessionMetricDeviceRuntime{}, &model.Permission{}, &model.AccountGroup{}, &model.AccountGroupMembership{}, &model.AccountGroupPermission{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.LiveTrackSession{}, &model.LiveTrackPoint{}, &model.FlightLog{}, &model.FlightLogSync{}, &model.FlightLogSyncBatch{}, &model.FlightLogSyncRecord{}, &model.LandingPoint{}, &model.LandingPointSettings{}, &model.CompetitionTask{}, &model.AppRelease{}, &model.ChatMessage{}, &model.ChatMedia{}, &model.ChatConversationPin{}, &model.ChatConversationRead{}, &model.SessionMetricEvent{}, &model.SessionMetricRuntime{}, &model.SessionMetricDeviceRuntime{}, &model.Permission{}, &model.AccountGroup{}, &model.AccountGroupMembership{}, &model.AccountGroupPermission{}); err != nil {
 		return nil, fmt.Errorf("migrate database schema: %w", err)
 	}
 	if err := migratePilotNumbers(db.WithContext(ctx)); err != nil {
