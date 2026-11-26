@@ -7,14 +7,15 @@ import (
 )
 
 type LiveTrackSession struct {
-	ID            uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
-	UserID        uuid.UUID  `gorm:"type:uuid;not null;index" json:"-"`
-	PilotName     string     `gorm:"size:32;not null" json:"pilot_name"`
-	StartedAt     time.Time  `gorm:"not null;index" json:"started_at"`
-	EndedAt       *time.Time `gorm:"index" json:"ended_at,omitempty"`
-	PubliclyShare bool       `gorm:"not null;default:false;index" json:"-"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	ID                            uuid.UUID  `gorm:"type:uuid;primaryKey" json:"id"`
+	UserID                        uuid.UUID  `gorm:"type:uuid;not null;index" json:"-"`
+	PilotName                     string     `gorm:"size:32;not null" json:"pilot_name"`
+	StartedAt                     time.Time  `gorm:"not null;index" json:"started_at"`
+	EndedAt                       *time.Time `gorm:"index" json:"ended_at,omitempty"`
+	PubliclyShare                 bool       `gorm:"not null;default:false;index" json:"-"`
+	CurrentCompetitionTaskOwnerID *uuid.UUID `gorm:"type:uuid;index" json:"-"`
+	CreatedAt                     time.Time  `json:"created_at"`
+	UpdatedAt                     time.Time  `json:"updated_at"`
 }
 
 type PublicPilotLocation struct {

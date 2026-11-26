@@ -20,6 +20,8 @@ const maxCompetitionTaskRequestBytes = service.MaxCompetitionTaskBytes + 1024
 type CompetitionTaskService interface {
 	Replace(ctx context.Context, userID uuid.UUID, task json.RawMessage) (time.Time, error)
 	ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error)
+	CurrentTaskOwner(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error)
+	SetCurrentTaskOwner(ctx context.Context, userID uuid.UUID, taskOwnerID *uuid.UUID) error
 }
 
 type CompetitionTaskHandler struct {
@@ -68,11 +70,21 @@ func (h *CompetitionTaskHandler) Replace(c *gin.Context) {
 }
 
 func (h *CompetitionTaskHandler) List(c *gin.Context) {
+	userID, ok := competitionTaskUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	tasks, err := h.tasks.ListAll(c.Request.Context())
 	if errors.Is(err, service.ErrInvalidCompetitionTask) {
 		respondError(c, http.StatusInternalServerError, "invalid stored competition task")
 		return
 	}
+	if err != nil {
+		respondInternalError(c)
+		return
+	}
+	currentTaskOwnerID, err := h.tasks.CurrentTaskOwner(c.Request.Context(), userID)
 	if err != nil {
 		respondInternalError(c)
 		return
@@ -87,7 +99,57 @@ func (h *CompetitionTaskHandler) List(c *gin.Context) {
 			OwnerID:     task.UserID,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"tasks": entries})
+	c.JSON(http.StatusOK, gin.H{"tasks": entries, "current_task_owner_id": currentTaskOwnerID})
+}
+
+func (h *CompetitionTaskHandler) SetCurrent(c *gin.Context) {
+	userID, ok := competitionTaskUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	var request struct {
+		TaskOwnerID json.RawMessage `json:"task_owner_id"`
+	}
+	if err := decoder.Decode(&request); err != nil || len(request.TaskOwnerID) == 0 {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		respondError(c, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var taskOwnerID *uuid.UUID
+	if string(request.TaskOwnerID) != "null" {
+		var rawID string
+		if err := json.Unmarshal(request.TaskOwnerID, &rawID); err != nil {
+			respondError(c, http.StatusBadRequest, "invalid task owner")
+			return
+		}
+		parsed, err := uuid.Parse(rawID)
+		if err != nil || parsed == uuid.Nil {
+			respondError(c, http.StatusBadRequest, "invalid task owner")
+			return
+		}
+		taskOwnerID = &parsed
+	}
+	if err := h.tasks.SetCurrentTaskOwner(c.Request.Context(), userID, taskOwnerID); err != nil {
+		if errors.Is(err, service.ErrCompetitionTaskNotFound) {
+			respondError(c, http.StatusNotFound, "competition task not found")
+			return
+		}
+		if errors.Is(err, service.ErrInvalidCompetitionTask) {
+			respondError(c, http.StatusBadRequest, "invalid task owner")
+			return
+		}
+		respondInternalError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"current_task_owner_id": taskOwnerID})
 }
 
 type competitionTaskResponse struct {

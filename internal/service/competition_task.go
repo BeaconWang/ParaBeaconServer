@@ -10,9 +10,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/model"
+	"github.com/parabeacon/server/internal/repository"
 )
 
-var ErrInvalidCompetitionTask = errors.New("invalid competition task")
+var (
+	ErrInvalidCompetitionTask  = errors.New("invalid competition task")
+	ErrCompetitionTaskNotFound = errors.New("competition task not found")
+)
 
 const (
 	MaxCompetitionTaskBytes      = 256 << 10
@@ -22,6 +26,8 @@ const (
 type CompetitionTaskRepository interface {
 	Replace(ctx context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error
 	ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error)
+	CurrentTaskOwner(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error)
+	SetCurrentTaskOwner(ctx context.Context, userID uuid.UUID, taskOwnerID *uuid.UUID) error
 }
 
 type CompetitionTaskService struct {
@@ -54,6 +60,26 @@ func (s *CompetitionTaskService) ListAll(ctx context.Context) ([]model.Competiti
 		}
 	}
 	return tasks, nil
+}
+
+func (s *CompetitionTaskService) CurrentTaskOwner(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error) {
+	if userID == uuid.Nil {
+		return nil, ErrInvalidCompetitionTask
+	}
+	return s.tasks.CurrentTaskOwner(ctx, userID)
+}
+
+func (s *CompetitionTaskService) SetCurrentTaskOwner(ctx context.Context, userID uuid.UUID, taskOwnerID *uuid.UUID) error {
+	if userID == uuid.Nil || (taskOwnerID != nil && *taskOwnerID == uuid.Nil) {
+		return ErrInvalidCompetitionTask
+	}
+	if err := s.tasks.SetCurrentTaskOwner(ctx, userID, taskOwnerID); err != nil {
+		if errors.Is(err, repository.ErrCompetitionTaskNotFound) {
+			return ErrCompetitionTaskNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func validCompetitionTask(raw json.RawMessage) bool {

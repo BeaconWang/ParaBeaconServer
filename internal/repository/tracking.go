@@ -36,6 +36,11 @@ func NewTrackingRepository(db *gorm.DB) *GormTrackingRepository {
 
 func (r *GormTrackingRepository) CreateSession(ctx context.Context, session *model.LiveTrackSession) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("current_competition_task_owner_id").Where("id = ?", session.UserID).Take(&user).Error; err != nil {
+			return err
+		}
+		session.CurrentCompetitionTaskOwnerID = user.CurrentCompetitionTaskOwnerID
 		endedAt := time.Now().UTC()
 		if err := tx.Model(&model.LiveTrackSession{}).
 			Where("user_id = ? AND ended_at IS NULL", session.UserID).
@@ -131,8 +136,7 @@ func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID
 		query = query.Where("(latest.longitude >= ? OR latest.longitude <= ?)", west, east)
 	}
 	if taskOwnerID != uuid.Nil {
-		query = query.Joins("JOIN competition_tasks AS ct ON ct.user_id = s.user_id").
-			Where("ct.user_id = ?", taskOwnerID)
+		query = query.Where("s.current_competition_task_owner_id = ?", taskOwnerID)
 	}
 	if after != uuid.Nil {
 		query = query.Where("s.id > ?", after)

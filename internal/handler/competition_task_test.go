@@ -16,10 +16,11 @@ import (
 )
 
 type competitionTaskHandlerTestService struct {
-	userID    uuid.UUID
-	task      json.RawMessage
-	updatedAt time.Time
-	tasks     []model.CompetitionTaskListEntry
+	userID           uuid.UUID
+	task             json.RawMessage
+	updatedAt        time.Time
+	tasks            []model.CompetitionTaskListEntry
+	currentTaskOwner *uuid.UUID
 }
 
 func (s *competitionTaskHandlerTestService) Replace(_ context.Context, userID uuid.UUID, task json.RawMessage) (time.Time, error) {
@@ -31,10 +32,19 @@ func (s *competitionTaskHandlerTestService) ListAll(context.Context) ([]model.Co
 	return s.tasks, nil
 }
 
+func (s *competitionTaskHandlerTestService) CurrentTaskOwner(context.Context, uuid.UUID) (*uuid.UUID, error) {
+	return s.currentTaskOwner, nil
+}
+
+func (s *competitionTaskHandlerTestService) SetCurrentTaskOwner(_ context.Context, _ uuid.UUID, ownerID *uuid.UUID) error {
+	s.currentTaskOwner = ownerID
+	return nil
+}
+
 func TestCompetitionTaskReplaceUsesAuthenticatedAccountAndListHidesOwner(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	userID := uuid.New()
-	service := &competitionTaskHandlerTestService{updatedAt: time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)}
+	service := &competitionTaskHandlerTestService{updatedAt: time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC), currentTaskOwner: &userID}
 	service.tasks = []model.CompetitionTaskListEntry{{
 		UserID:      userID,
 		TaskData:    `{"taskType":"CLASSIC","version":1,"turnpoints":[{"radius":400,"waypoint":{"lat":47.1,"lon":8.5}}]}`,
@@ -47,7 +57,14 @@ func TestCompetitionTaskReplaceUsesAuthenticatedAccountAndListHidesOwner(t *test
 		c.Set(middleware.AuthenticatedUserIDKey, userID)
 		NewCompetitionTaskHandler(service).Replace(c)
 	})
-	engine.GET("/competition-tasks", NewCompetitionTaskHandler(service).List)
+	engine.GET("/competition-tasks", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		NewCompetitionTaskHandler(service).List(c)
+	})
+	engine.PUT("/user/current-competition-task", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		NewCompetitionTaskHandler(service).SetCurrent(c)
+	})
 
 	body := `{"task":{"taskType":"CLASSIC","version":1,"turnpoints":[{"radius":400,"waypoint":{"lat":47.1,"lon":8.5}}]}}`
 	response := httptest.NewRecorder()
@@ -76,6 +93,52 @@ func TestCompetitionTaskReplaceUsesAuthenticatedAccountAndListHidesOwner(t *test
 		string(payload.Tasks[0]["display_name"]) != `"Pilot One"` ||
 		string(payload.Tasks[0]["owner_id"]) != `"`+userID.String()+`"` {
 		t.Fatalf("server list owner fields = %s / %s / %s", payload.Tasks[0]["username"], payload.Tasks[0]["display_name"], payload.Tasks[0]["owner_id"])
+	}
+	var responsePayload map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &responsePayload); err != nil {
+		t.Fatal(err)
+	}
+	if string(responsePayload["current_task_owner_id"]) != `"`+userID.String()+`"` {
+		t.Fatalf("current_task_owner_id = %s", responsePayload["current_task_owner_id"])
+	}
+}
+
+func TestCompetitionTaskSetCurrentAllowsSelectionAndUnselection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID, ownerID := uuid.New(), uuid.New()
+	service := &competitionTaskHandlerTestService{}
+	engine := gin.New()
+	engine.PUT("/user/current-competition-task", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		NewCompetitionTaskHandler(service).SetCurrent(c)
+	})
+	for _, test := range []struct {
+		body string
+		want *uuid.UUID
+	}{
+		{body: `{"task_owner_id":"` + ownerID.String() + `"}`, want: &ownerID},
+		{body: `{"task_owner_id":null}`, want: nil},
+	} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPut, "/user/current-competition-task", strings.NewReader(test.body))
+		request.Header.Set("Content-Type", "application/json")
+		engine.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("selection status=%d body=%s", response.Code, response.Body.String())
+		}
+		if (test.want == nil) != (service.currentTaskOwner == nil) ||
+			(test.want != nil && *service.currentTaskOwner != *test.want) {
+			t.Fatalf("stored selection=%v, want %v", service.currentTaskOwner, test.want)
+		}
+	}
+	for _, body := range []string{`{}`, `{"task_owner_id":"not-a-uuid"}`} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPut, "/user/current-competition-task", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		engine.ServeHTTP(response, request)
+		if response.Code != http.StatusBadRequest {
+			t.Errorf("body %s status=%d, want %d", body, response.Code, http.StatusBadRequest)
+		}
 	}
 }
 

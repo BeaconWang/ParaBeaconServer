@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -10,9 +11,13 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+var ErrCompetitionTaskNotFound = errors.New("competition task not found")
+
 type CompetitionTaskRepository interface {
 	Replace(ctx context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error
 	ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error)
+	CurrentTaskOwner(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error)
+	SetCurrentTaskOwner(ctx context.Context, userID uuid.UUID, taskOwnerID *uuid.UUID) error
 }
 
 type GormCompetitionTaskRepository struct {
@@ -24,15 +29,26 @@ func NewCompetitionTaskRepository(db *gorm.DB) *GormCompetitionTaskRepository {
 }
 
 func (r *GormCompetitionTaskRepository) Replace(ctx context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error {
-	task := model.CompetitionTask{
-		UserID:    userID,
-		TaskData:  taskData,
-		UpdatedAt: updatedAt,
-	}
-	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"task_data", "updated_at"}),
-	}).Create(&task).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		task := model.CompetitionTask{
+			UserID:    userID,
+			TaskData:  taskData,
+			UpdatedAt: updatedAt,
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{"task_data", "updated_at"}),
+		}).Create(&task).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.User{}).Where("id = ?", userID).
+			Update("current_competition_task_owner_id", userID).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.LiveTrackSession{}).
+			Where("user_id = ? AND ended_at IS NULL", userID).
+			Update("current_competition_task_owner_id", userID).Error
+	})
 }
 
 func (r *GormCompetitionTaskRepository) ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error) {
@@ -44,4 +60,43 @@ func (r *GormCompetitionTaskRepository) ListAll(ctx context.Context) ([]model.Co
 		Order("competition_tasks.updated_at DESC, competition_tasks.user_id ASC").
 		Scan(&tasks).Error
 	return tasks, err
+}
+
+func (r *GormCompetitionTaskRepository) CurrentTaskOwner(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error) {
+	var user model.User
+	if err := r.db.WithContext(ctx).
+		Select("current_competition_task_owner_id").
+		Where("id = ?", userID).
+		Take(&user).Error; err != nil {
+		return nil, err
+	}
+	return user.CurrentCompetitionTaskOwnerID, nil
+}
+
+func (r *GormCompetitionTaskRepository) SetCurrentTaskOwner(ctx context.Context, userID uuid.UUID, taskOwnerID *uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if taskOwnerID != nil {
+			var count int64
+			if err := tx.Model(&model.CompetitionTask{}).
+				Where("user_id = ?", *taskOwnerID).
+				Count(&count).Error; err != nil {
+				return err
+			}
+			if count == 0 {
+				return ErrCompetitionTaskNotFound
+			}
+		}
+		result := tx.Model(&model.User{}).
+			Where("id = ?", userID).
+			Updates(map[string]interface{}{"current_competition_task_owner_id": taskOwnerID})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Model(&model.LiveTrackSession{}).
+			Where("user_id = ? AND ended_at IS NULL", userID).
+			Updates(map[string]interface{}{"current_competition_task_owner_id": taskOwnerID}).Error
+	})
 }

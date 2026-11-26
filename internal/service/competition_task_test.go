@@ -11,10 +11,11 @@ import (
 )
 
 type competitionTaskTestRepository struct {
-	userID    uuid.UUID
-	taskData  string
-	updatedAt time.Time
-	tasks     []model.CompetitionTaskListEntry
+	userID           uuid.UUID
+	taskData         string
+	updatedAt        time.Time
+	tasks            []model.CompetitionTaskListEntry
+	currentTaskOwner *uuid.UUID
 }
 
 func (r *competitionTaskTestRepository) Replace(_ context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error {
@@ -24,6 +25,15 @@ func (r *competitionTaskTestRepository) Replace(_ context.Context, userID uuid.U
 
 func (r *competitionTaskTestRepository) ListAll(context.Context) ([]model.CompetitionTaskListEntry, error) {
 	return r.tasks, nil
+}
+
+func (r *competitionTaskTestRepository) CurrentTaskOwner(context.Context, uuid.UUID) (*uuid.UUID, error) {
+	return r.currentTaskOwner, nil
+}
+
+func (r *competitionTaskTestRepository) SetCurrentTaskOwner(_ context.Context, _ uuid.UUID, ownerID *uuid.UUID) error {
+	r.currentTaskOwner = ownerID
+	return nil
 }
 
 func TestCompetitionTaskServiceReplacesAndListsAllServerTasks(t *testing.T) {
@@ -54,6 +64,31 @@ func TestCompetitionTaskServiceReplacesAndListsAllServerTasks(t *testing.T) {
 	}
 	if listed[0].Username != "pilot-one" || listed[0].DisplayName != "First Pilot" {
 		t.Fatalf("ListAll() owner = %q / %q", listed[0].Username, listed[0].DisplayName)
+	}
+}
+
+func TestCompetitionTaskServiceSelectsAndClearsCurrentTask(t *testing.T) {
+	repository := &competitionTaskTestRepository{}
+	service := NewCompetitionTaskService(repository)
+	userID, taskOwnerID := uuid.New(), uuid.New()
+	ctx := context.Background()
+
+	if err := service.SetCurrentTaskOwner(ctx, userID, &taskOwnerID); err != nil {
+		t.Fatalf("SetCurrentTaskOwner(select) error = %v", err)
+	}
+	selected, err := service.CurrentTaskOwner(ctx, userID)
+	if err != nil || selected == nil || *selected != taskOwnerID {
+		t.Fatalf("CurrentTaskOwner() = %v, error = %v", selected, err)
+	}
+	if err := service.SetCurrentTaskOwner(ctx, userID, nil); err != nil {
+		t.Fatalf("SetCurrentTaskOwner(clear) error = %v", err)
+	}
+	selected, err = service.CurrentTaskOwner(ctx, userID)
+	if err != nil || selected != nil {
+		t.Fatalf("CurrentTaskOwner() after clear = %v, error = %v", selected, err)
+	}
+	if err := service.SetCurrentTaskOwner(ctx, uuid.Nil, &taskOwnerID); err != ErrInvalidCompetitionTask {
+		t.Fatalf("SetCurrentTaskOwner() with nil user error = %v", err)
 	}
 }
 

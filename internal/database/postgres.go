@@ -38,6 +38,9 @@ func Open(ctx context.Context, dsn string) (*gorm.DB, error) {
 	if err := db.WithContext(ctx).AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.LiveTrackSession{}, &model.LiveTrackPoint{}, &model.FlightLog{}, &model.FlightLogSync{}, &model.FlightLogSyncBatch{}, &model.FlightLogSyncRecord{}, &model.LandingPoint{}, &model.LandingPointSettings{}, &model.CompetitionTask{}, &model.AppRelease{}, &model.ChatMessage{}, &model.ChatMedia{}, &model.ChatConversationPin{}, &model.ChatConversationRead{}, &model.SessionMetricEvent{}, &model.SessionMetricRuntime{}, &model.SessionMetricDeviceRuntime{}, &model.Permission{}, &model.AccountGroup{}, &model.AccountGroupMembership{}, &model.AccountGroupPermission{}); err != nil {
 		return nil, fmt.Errorf("migrate database schema: %w", err)
 	}
+	if err := migrateCurrentCompetitionTaskSelection(db.WithContext(ctx)); err != nil {
+		return nil, fmt.Errorf("migrate current competition task selections: %w", err)
+	}
 	if err := migratePilotNumbers(db.WithContext(ctx)); err != nil {
 		return nil, fmt.Errorf("migrate pilot numbers: %w", err)
 	}
@@ -66,6 +69,44 @@ func Open(ctx context.Context, dsn string) (*gorm.DB, error) {
 		return nil, fmt.Errorf("migrate persistent account sessions: %w", err)
 	}
 	return db, nil
+}
+
+func migrateCurrentCompetitionTaskSelection(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(748392017)").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("CREATE TABLE IF NOT EXISTS parabeacon_schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP)").Error; err != nil {
+			return err
+		}
+		var alreadyApplied bool
+		if err := tx.Raw("SELECT EXISTS (SELECT 1 FROM parabeacon_schema_migrations WHERE name = ?)", "current_competition_task_selection_v1").Scan(&alreadyApplied).Error; err != nil {
+			return err
+		}
+		if alreadyApplied {
+			return nil
+		}
+		if err := tx.Exec(`
+			UPDATE users AS u
+			SET current_competition_task_owner_id = tasks.user_id
+			FROM competition_tasks AS tasks
+			WHERE tasks.user_id = u.id AND u.current_competition_task_owner_id IS NULL
+		`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			UPDATE live_track_sessions AS sessions
+			SET current_competition_task_owner_id = users.current_competition_task_owner_id
+			FROM users
+			WHERE sessions.user_id = users.id
+			  AND sessions.ended_at IS NULL
+			  AND sessions.current_competition_task_owner_id IS NULL
+			  AND users.current_competition_task_owner_id IS NOT NULL
+		`).Error; err != nil {
+			return err
+		}
+		return tx.Exec("INSERT INTO parabeacon_schema_migrations (name) VALUES (?)", "current_competition_task_selection_v1").Error
+	})
 }
 
 func migratePilotNumbers(db *gorm.DB) error {
