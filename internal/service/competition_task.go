@@ -21,7 +21,7 @@ const (
 
 type CompetitionTaskRepository interface {
 	Replace(ctx context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error
-	ListAll(ctx context.Context) ([]model.CompetitionTask, error)
+	ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error)
 }
 
 type CompetitionTaskService struct {
@@ -43,13 +43,13 @@ func (s *CompetitionTaskService) Replace(ctx context.Context, userID uuid.UUID, 
 	return updatedAt, nil
 }
 
-func (s *CompetitionTaskService) ListAll(ctx context.Context) ([]model.CompetitionTask, error) {
+func (s *CompetitionTaskService) ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error) {
 	tasks, err := s.tasks.ListAll(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, task := range tasks {
-		if task.UserID == uuid.Nil || !validCompetitionTask(json.RawMessage(task.TaskData)) {
+		if task.UserID == uuid.Nil || task.Username == "" || !validCompetitionTask(json.RawMessage(task.TaskData)) {
 			return nil, ErrInvalidCompetitionTask
 		}
 	}

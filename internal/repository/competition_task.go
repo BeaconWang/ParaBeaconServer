@@ -12,7 +12,7 @@ import (
 
 type CompetitionTaskRepository interface {
 	Replace(ctx context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error
-	ListAll(ctx context.Context) ([]model.CompetitionTask, error)
+	ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error)
 }
 
 type GormCompetitionTaskRepository struct {
@@ -35,8 +35,13 @@ func (r *GormCompetitionTaskRepository) Replace(ctx context.Context, userID uuid
 	}).Create(&task).Error
 }
 
-func (r *GormCompetitionTaskRepository) ListAll(ctx context.Context) ([]model.CompetitionTask, error) {
-	tasks := make([]model.CompetitionTask, 0)
-	err := r.db.WithContext(ctx).Order("updated_at DESC, user_id ASC").Find(&tasks).Error
+func (r *GormCompetitionTaskRepository) ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error) {
+	tasks := make([]model.CompetitionTaskListEntry, 0)
+	err := r.db.WithContext(ctx).
+		Table("competition_tasks").
+		Select("competition_tasks.user_id, competition_tasks.task_data, competition_tasks.updated_at, users.username, users.display_name").
+		Joins("JOIN users ON users.id = competition_tasks.user_id").
+		Order("competition_tasks.updated_at DESC, competition_tasks.user_id ASC").
+		Scan(&tasks).Error
 	return tasks, err
 }

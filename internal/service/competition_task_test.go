@@ -14,7 +14,7 @@ type competitionTaskTestRepository struct {
 	userID    uuid.UUID
 	taskData  string
 	updatedAt time.Time
-	tasks     []model.CompetitionTask
+	tasks     []model.CompetitionTaskListEntry
 }
 
 func (r *competitionTaskTestRepository) Replace(_ context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error {
@@ -22,7 +22,7 @@ func (r *competitionTaskTestRepository) Replace(_ context.Context, userID uuid.U
 	return nil
 }
 
-func (r *competitionTaskTestRepository) ListAll(context.Context) ([]model.CompetitionTask, error) {
+func (r *competitionTaskTestRepository) ListAll(context.Context) ([]model.CompetitionTaskListEntry, error) {
 	return r.tasks, nil
 }
 
@@ -40,11 +40,20 @@ func TestCompetitionTaskServiceReplacesAndListsAllServerTasks(t *testing.T) {
 		t.Fatalf("stored task user=%s data=%s updated=%s", repository.userID, repository.taskData, repository.updatedAt)
 	}
 
-	other := model.CompetitionTask{UserID: uuid.New(), TaskData: string(raw), UpdatedAt: updatedAt}
-	repository.tasks = []model.CompetitionTask{{UserID: userID, TaskData: string(raw), UpdatedAt: updatedAt}, other}
+	other := model.CompetitionTaskListEntry{
+		UserID: uuid.New(), TaskData: string(raw), UpdatedAt: updatedAt,
+		Username: "pilot-two", DisplayName: "Second Pilot",
+	}
+	repository.tasks = []model.CompetitionTaskListEntry{{
+		UserID: userID, TaskData: string(raw), UpdatedAt: updatedAt,
+		Username: "pilot-one", DisplayName: "First Pilot",
+	}, other}
 	listed, err := tasks.ListAll(context.Background())
 	if err != nil || len(listed) != 2 {
 		t.Fatalf("ListAll() = %d tasks, error = %v", len(listed), err)
+	}
+	if listed[0].Username != "pilot-one" || listed[0].DisplayName != "First Pilot" {
+		t.Fatalf("ListAll() owner = %q / %q", listed[0].Username, listed[0].DisplayName)
 	}
 }
 

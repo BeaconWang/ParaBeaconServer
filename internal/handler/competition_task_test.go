@@ -19,7 +19,7 @@ type competitionTaskHandlerTestService struct {
 	userID    uuid.UUID
 	task      json.RawMessage
 	updatedAt time.Time
-	tasks     []model.CompetitionTask
+	tasks     []model.CompetitionTaskListEntry
 }
 
 func (s *competitionTaskHandlerTestService) Replace(_ context.Context, userID uuid.UUID, task json.RawMessage) (time.Time, error) {
@@ -27,7 +27,7 @@ func (s *competitionTaskHandlerTestService) Replace(_ context.Context, userID uu
 	return s.updatedAt, nil
 }
 
-func (s *competitionTaskHandlerTestService) ListAll(context.Context) ([]model.CompetitionTask, error) {
+func (s *competitionTaskHandlerTestService) ListAll(context.Context) ([]model.CompetitionTaskListEntry, error) {
 	return s.tasks, nil
 }
 
@@ -35,7 +35,13 @@ func TestCompetitionTaskReplaceUsesAuthenticatedAccountAndListHidesOwner(t *test
 	gin.SetMode(gin.TestMode)
 	userID := uuid.New()
 	service := &competitionTaskHandlerTestService{updatedAt: time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)}
-	service.tasks = []model.CompetitionTask{{UserID: userID, TaskData: `{"taskType":"CLASSIC","version":1,"turnpoints":[{"radius":400,"waypoint":{"lat":47.1,"lon":8.5}}]}`, UpdatedAt: service.updatedAt}}
+	service.tasks = []model.CompetitionTaskListEntry{{
+		UserID:      userID,
+		TaskData:    `{"taskType":"CLASSIC","version":1,"turnpoints":[{"radius":400,"waypoint":{"lat":47.1,"lon":8.5}}]}`,
+		UpdatedAt:   service.updatedAt,
+		Username:    "pilot-one",
+		DisplayName: "Pilot One",
+	}}
 	engine := gin.New()
 	engine.PUT("/user/competition-task", func(c *gin.Context) {
 		c.Set(middleware.AuthenticatedUserIDKey, userID)
@@ -65,6 +71,10 @@ func TestCompetitionTaskReplaceUsesAuthenticatedAccountAndListHidesOwner(t *test
 	}
 	if _, exposed := payload.Tasks[0]["user_id"]; exposed {
 		t.Fatal("server list exposed the task owner's ID")
+	}
+	if string(payload.Tasks[0]["username"]) != `"pilot-one"` ||
+		string(payload.Tasks[0]["display_name"]) != `"Pilot One"` {
+		t.Fatalf("server list owner fields = %s / %s", payload.Tasks[0]["username"], payload.Tasks[0]["display_name"])
 	}
 }
 

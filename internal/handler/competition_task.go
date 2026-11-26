@@ -19,7 +19,7 @@ const maxCompetitionTaskRequestBytes = service.MaxCompetitionTaskBytes + 1024
 
 type CompetitionTaskService interface {
 	Replace(ctx context.Context, userID uuid.UUID, task json.RawMessage) (time.Time, error)
-	ListAll(ctx context.Context) ([]model.CompetitionTask, error)
+	ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error)
 }
 
 type CompetitionTaskHandler struct {
@@ -80,16 +80,20 @@ func (h *CompetitionTaskHandler) List(c *gin.Context) {
 	entries := make([]competitionTaskResponse, 0, len(tasks))
 	for _, task := range tasks {
 		entries = append(entries, competitionTaskResponse{
-			Task:      json.RawMessage(task.TaskData),
-			UpdatedAt: task.UpdatedAt,
+			Task:        json.RawMessage(task.TaskData),
+			UpdatedAt:   task.UpdatedAt,
+			Username:    task.Username,
+			DisplayName: task.DisplayName,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"tasks": entries})
 }
 
 type competitionTaskResponse struct {
-	Task      json.RawMessage `json:"task"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	Task        json.RawMessage `json:"task"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	Username    string          `json:"username"`
+	DisplayName string          `json:"display_name"`
 }
 
 func competitionTaskUserID(c *gin.Context) (uuid.UUID, bool) {
