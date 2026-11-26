@@ -122,6 +122,8 @@ func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID
 		Where("s.ended_at IS NULL AND s.publicly_share = ?", true).
 		Where("latest.timestamp >= ? AND latest.timestamp <= ?", observedSince, observedUntil).
 		Where("latest.latitude BETWEEN ? AND ?", south, north)
+	// Channel authorization is always applied for signed-in viewers; the pinned
+	// task predicate below is an additional AND filter, never a replacement.
 	if userID != uuid.Nil {
 		query = query.
 			Joins("JOIN users AS viewer ON viewer.id = ?", userID).

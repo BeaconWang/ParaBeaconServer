@@ -140,7 +140,7 @@ func TestStartSessionStoresExplicitPublicSharingConsent(t *testing.T) {
 	}
 }
 
-func TestListPublicLocationsValidatesAndBoundsResults(t *testing.T) {
+func TestListPublicLocationsCombinesViewerChannelAndPinnedTaskFilters(t *testing.T) {
 	repository := &trackingTestRepository{locations: []model.PublicPilotLocation{{PilotName: "pilot_one", PilotNumber: 123456}}}
 	tracking := NewTrackingService(repository)
 	after := uuid.New()
