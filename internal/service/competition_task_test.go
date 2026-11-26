@@ -16,10 +16,16 @@ type competitionTaskTestRepository struct {
 	updatedAt        time.Time
 	tasks            []model.CompetitionTaskListEntry
 	currentTaskOwner *uuid.UUID
+	deletedUserID    uuid.UUID
 }
 
 func (r *competitionTaskTestRepository) Replace(_ context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error {
 	r.userID, r.taskData, r.updatedAt = userID, taskData, updatedAt
+	return nil
+}
+
+func (r *competitionTaskTestRepository) DeleteOwnTask(_ context.Context, userID uuid.UUID) error {
+	r.deletedUserID = userID
 	return nil
 }
 
@@ -64,6 +70,21 @@ func TestCompetitionTaskServiceReplacesAndListsAllServerTasks(t *testing.T) {
 	}
 	if listed[0].Username != "pilot-one" || listed[0].DisplayName != "First Pilot" {
 		t.Fatalf("ListAll() owner = %q / %q", listed[0].Username, listed[0].DisplayName)
+	}
+}
+
+func TestCompetitionTaskServiceDeletesOwnTask(t *testing.T) {
+	repository := &competitionTaskTestRepository{}
+	service := NewCompetitionTaskService(repository)
+	userID := uuid.New()
+	if err := service.DeleteOwnTask(context.Background(), userID); err != nil {
+		t.Fatalf("DeleteOwnTask() error = %v", err)
+	}
+	if repository.deletedUserID != userID {
+		t.Fatalf("deleted user ID = %s, want %s", repository.deletedUserID, userID)
+	}
+	if err := service.DeleteOwnTask(context.Background(), uuid.Nil); err != ErrInvalidCompetitionTask {
+		t.Fatalf("DeleteOwnTask() with nil user error = %v", err)
 	}
 }
 

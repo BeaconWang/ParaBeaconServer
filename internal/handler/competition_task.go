@@ -19,6 +19,7 @@ const maxCompetitionTaskRequestBytes = service.MaxCompetitionTaskBytes + 1024
 
 type CompetitionTaskService interface {
 	Replace(ctx context.Context, userID uuid.UUID, task json.RawMessage) (time.Time, error)
+	DeleteOwnTask(ctx context.Context, userID uuid.UUID) error
 	ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error)
 	CurrentTaskOwner(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error)
 	SetCurrentTaskOwner(ctx context.Context, userID uuid.UUID, taskOwnerID *uuid.UUID) error
@@ -69,6 +70,27 @@ func (h *CompetitionTaskHandler) Replace(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"updated_at": updatedAt})
 }
 
+func (h *CompetitionTaskHandler) DeleteOwn(c *gin.Context) {
+	userID, ok := competitionTaskUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if err := h.tasks.DeleteOwnTask(c.Request.Context(), userID); err != nil {
+		if errors.Is(err, service.ErrCompetitionTaskNotFound) {
+			respondError(c, http.StatusNotFound, "competition task not found")
+			return
+		}
+		if errors.Is(err, service.ErrInvalidCompetitionTask) {
+			respondError(c, http.StatusBadRequest, "invalid account")
+			return
+		}
+		respondInternalError(c)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *CompetitionTaskHandler) List(c *gin.Context) {
 	userID, ok := competitionTaskUserID(c)
 	if !ok {
@@ -100,6 +122,20 @@ func (h *CompetitionTaskHandler) List(c *gin.Context) {
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"tasks": entries, "current_task_owner_id": currentTaskOwnerID})
+}
+
+func (h *CompetitionTaskHandler) Current(c *gin.Context) {
+	userID, ok := competitionTaskUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	ownerID, err := h.tasks.CurrentTaskOwner(c.Request.Context(), userID)
+	if err != nil {
+		respondInternalError(c)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"current_task_owner_id": ownerID})
 }
 
 func (h *CompetitionTaskHandler) SetCurrent(c *gin.Context) {

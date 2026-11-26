@@ -25,6 +25,7 @@ const (
 
 type CompetitionTaskRepository interface {
 	Replace(ctx context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error
+	DeleteOwnTask(ctx context.Context, userID uuid.UUID) error
 	ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error)
 	CurrentTaskOwner(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error)
 	SetCurrentTaskOwner(ctx context.Context, userID uuid.UUID, taskOwnerID *uuid.UUID) error
@@ -47,6 +48,19 @@ func (s *CompetitionTaskService) Replace(ctx context.Context, userID uuid.UUID, 
 		return time.Time{}, err
 	}
 	return updatedAt, nil
+}
+
+func (s *CompetitionTaskService) DeleteOwnTask(ctx context.Context, userID uuid.UUID) error {
+	if userID == uuid.Nil {
+		return ErrInvalidCompetitionTask
+	}
+	if err := s.tasks.DeleteOwnTask(ctx, userID); err != nil {
+		if errors.Is(err, repository.ErrCompetitionTaskNotFound) {
+			return ErrCompetitionTaskNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *CompetitionTaskService) ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error) {

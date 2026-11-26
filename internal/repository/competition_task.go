@@ -15,6 +15,7 @@ var ErrCompetitionTaskNotFound = errors.New("competition task not found")
 
 type CompetitionTaskRepository interface {
 	Replace(ctx context.Context, userID uuid.UUID, taskData string, updatedAt time.Time) error
+	DeleteOwnTask(ctx context.Context, userID uuid.UUID) error
 	ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error)
 	CurrentTaskOwner(ctx context.Context, userID uuid.UUID) (*uuid.UUID, error)
 	SetCurrentTaskOwner(ctx context.Context, userID uuid.UUID, taskOwnerID *uuid.UUID) error
@@ -51,6 +52,26 @@ func (r *GormCompetitionTaskRepository) Replace(ctx context.Context, userID uuid
 	})
 }
 
+func (r *GormCompetitionTaskRepository) DeleteOwnTask(ctx context.Context, userID uuid.UUID) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("user_id = ?", userID).Delete(&model.CompetitionTask{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrCompetitionTaskNotFound
+		}
+		if err := tx.Model(&model.User{}).
+			Where("current_competition_task_owner_id = ?", userID).
+			Update("current_competition_task_owner_id", nil).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.LiveTrackSession{}).
+			Where("current_competition_task_owner_id = ?", userID).
+			Update("current_competition_task_owner_id", nil).Error
+	})
+}
+
 func (r *GormCompetitionTaskRepository) ListAll(ctx context.Context) ([]model.CompetitionTaskListEntry, error) {
 	tasks := make([]model.CompetitionTaskListEntry, 0)
 	err := r.db.WithContext(ctx).
@@ -76,14 +97,14 @@ func (r *GormCompetitionTaskRepository) CurrentTaskOwner(ctx context.Context, us
 func (r *GormCompetitionTaskRepository) SetCurrentTaskOwner(ctx context.Context, userID uuid.UUID, taskOwnerID *uuid.UUID) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if taskOwnerID != nil {
-			var count int64
-			if err := tx.Model(&model.CompetitionTask{}).
+			var task model.CompetitionTask
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 				Where("user_id = ?", *taskOwnerID).
-				Count(&count).Error; err != nil {
+				Take(&task).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrCompetitionTaskNotFound
+				}
 				return err
-			}
-			if count == 0 {
-				return ErrCompetitionTaskNotFound
 			}
 		}
 		result := tx.Model(&model.User{}).

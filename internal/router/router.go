@@ -182,6 +182,8 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.POST("/landing-points", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), landingPointHandler.Import)
 		protected.GET("/competition-tasks", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), competitionTaskHandler.List)
 		protected.PUT("/user/competition-task", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), competitionTaskHandler.Replace)
+		protected.DELETE("/user/competition-task", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), competitionTaskHandler.DeleteOwn)
+		protected.GET("/user/current-competition-task", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), competitionTaskHandler.Current)
 		protected.PUT("/user/current-competition-task", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), competitionTaskHandler.SetCurrent)
 		protected.GET("/chat/messages", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), chatHandler.ListMessages)
 		protected.POST("/chat/media", middleware.NewFixedWindowLimiter(20, time.Hour, 10000).Middleware(), chatMediaHandler.Upload)

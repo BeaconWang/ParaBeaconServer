@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/middleware"
 	"github.com/parabeacon/server/internal/model"
+	servicepkg "github.com/parabeacon/server/internal/service"
 )
 
 type competitionTaskHandlerTestService struct {
@@ -21,11 +22,18 @@ type competitionTaskHandlerTestService struct {
 	updatedAt        time.Time
 	tasks            []model.CompetitionTaskListEntry
 	currentTaskOwner *uuid.UUID
+	deletedUserID    uuid.UUID
+	deleteErr        error
 }
 
 func (s *competitionTaskHandlerTestService) Replace(_ context.Context, userID uuid.UUID, task json.RawMessage) (time.Time, error) {
 	s.userID, s.task = userID, task
 	return s.updatedAt, nil
+}
+
+func (s *competitionTaskHandlerTestService) DeleteOwnTask(_ context.Context, userID uuid.UUID) error {
+	s.deletedUserID = userID
+	return s.deleteErr
 }
 
 func (s *competitionTaskHandlerTestService) ListAll(context.Context) ([]model.CompetitionTaskListEntry, error) {
@@ -100,6 +108,72 @@ func TestCompetitionTaskReplaceUsesAuthenticatedAccountAndListHidesOwner(t *test
 	}
 	if string(responsePayload["current_task_owner_id"]) != `"`+userID.String()+`"` {
 		t.Fatalf("current_task_owner_id = %s", responsePayload["current_task_owner_id"])
+	}
+}
+
+func TestCompetitionTaskDeleteOwnRequiresAuthenticationAndRemovesOnlyOwnTask(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID := uuid.New()
+	service := &competitionTaskHandlerTestService{}
+	handler := NewCompetitionTaskHandler(service)
+	authenticated := gin.New()
+	authenticated.DELETE("/user/competition-task", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.DeleteOwn(c)
+	})
+
+	response := httptest.NewRecorder()
+	authenticated.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/user/competition-task", nil))
+	if response.Code != http.StatusNoContent || service.deletedUserID != userID {
+		t.Fatalf("delete status=%d user=%s body=%s", response.Code, service.deletedUserID, response.Body.String())
+	}
+
+	service.deleteErr = servicepkg.ErrCompetitionTaskNotFound
+	response = httptest.NewRecorder()
+	authenticated.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/user/competition-task", nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("missing task status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	unauthenticated := gin.New()
+	unauthenticated.DELETE("/user/competition-task", handler.DeleteOwn)
+	response = httptest.NewRecorder()
+	unauthenticated.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/user/competition-task", nil))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated delete status=%d", response.Code)
+	}
+}
+
+func TestCompetitionTaskCurrentReturnsOnlyAuthenticatedSelection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	userID, ownerID := uuid.New(), uuid.New()
+	service := &competitionTaskHandlerTestService{currentTaskOwner: &ownerID}
+	handler := NewCompetitionTaskHandler(service)
+	engine := gin.New()
+	engine.GET("/user/current-competition-task", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		handler.Current(c)
+	})
+
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/user/current-competition-task", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), ownerID.String()) {
+		t.Fatalf("current status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	service.currentTaskOwner = nil
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/user/current-competition-task", nil))
+	if response.Code != http.StatusOK || strings.TrimSpace(response.Body.String()) != "{\"current_task_owner_id\":null}" {
+		t.Fatalf("cleared current status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	unauthenticated := gin.New()
+	unauthenticated.GET("/user/current-competition-task", handler.Current)
+	response = httptest.NewRecorder()
+	unauthenticated.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/user/current-competition-task", nil))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated current status=%d", response.Code)
 	}
 }
 
