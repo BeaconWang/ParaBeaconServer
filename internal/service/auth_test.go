@@ -288,6 +288,15 @@ func TestAuthServiceChangePasswordVerifiesCurrentPasswordAndRevokesSessions(t *t
 	}
 }
 
+func TestAuthServiceRejectsPublicBeaconRegistration(t *testing.T) {
+	repo := newMemoryUsers()
+	tokens := utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute)
+	svc := NewAuthService(repo, tokens)
+	if _, err := svc.Register(context.Background(), "Beacon", "root@example.com", "a-long-unique-passphrase"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Register() error = %v, want conflict", err)
+	}
+}
+
 func TestAuthServiceRegisterLoginAndProfile(t *testing.T) {
 	repo := newMemoryUsers()
 	tokens := utils.NewTokenManager("0123456789abcdef0123456789abcdef", "test-issuer", time.Minute)

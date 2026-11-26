@@ -85,6 +85,9 @@ func (s *AuthService) Register(ctx context.Context, username, email, password st
 	if !usernamePattern.MatchString(username) {
 		return nil, fmt.Errorf("%w: username must be 3-32 letters, digits, or underscores", ErrInvalidInput)
 	}
+	if username == "beacon" {
+		return nil, ErrConflict
+	}
 	if email != "" {
 		parsedEmail, err := mail.ParseAddress(email)
 		if err != nil || parsedEmail.Address != email || len(email) > 254 {

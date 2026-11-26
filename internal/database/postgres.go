@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/parabeacon/server/internal/model"
+	"github.com/parabeacon/server/internal/repository"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -34,11 +35,14 @@ func Open(ctx context.Context, dsn string) (*gorm.DB, error) {
 	if err := sqlDB.PingContext(pingCtx); err != nil {
 		return nil, fmt.Errorf("ping PostgreSQL: %w", err)
 	}
-	if err := db.WithContext(ctx).AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.LiveTrackSession{}, &model.LiveTrackPoint{}, &model.FlightLog{}, &model.FlightLogSync{}, &model.FlightLogSyncBatch{}, &model.FlightLogSyncRecord{}, &model.LandingPoint{}, &model.LandingPointSettings{}, &model.AppRelease{}, &model.ChatMessage{}, &model.ChatMedia{}, &model.ChatConversationPin{}, &model.ChatConversationRead{}, &model.SessionMetricEvent{}, &model.SessionMetricRuntime{}, &model.SessionMetricDeviceRuntime{}); err != nil {
+	if err := db.WithContext(ctx).AutoMigrate(&model.User{}, &model.RefreshToken{}, &model.LiveTrackSession{}, &model.LiveTrackPoint{}, &model.FlightLog{}, &model.FlightLogSync{}, &model.FlightLogSyncBatch{}, &model.FlightLogSyncRecord{}, &model.LandingPoint{}, &model.LandingPointSettings{}, &model.AppRelease{}, &model.ChatMessage{}, &model.ChatMedia{}, &model.ChatConversationPin{}, &model.ChatConversationRead{}, &model.SessionMetricEvent{}, &model.SessionMetricRuntime{}, &model.SessionMetricDeviceRuntime{}, &model.Permission{}, &model.AccountGroup{}, &model.AccountGroupMembership{}, &model.AccountGroupPermission{}); err != nil {
 		return nil, fmt.Errorf("migrate database schema: %w", err)
 	}
 	if err := migratePilotNumbers(db.WithContext(ctx)); err != nil {
 		return nil, fmt.Errorf("migrate pilot numbers: %w", err)
+	}
+	if err := repository.SeedAccountGroups(ctx, db); err != nil {
+		return nil, fmt.Errorf("seed account groups: %w", err)
 	}
 	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Exec("ALTER TABLE refresh_tokens ALTER COLUMN expires_at DROP NOT NULL").Error; err != nil {

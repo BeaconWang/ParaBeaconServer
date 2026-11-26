@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-//go:embed auth.js clients.html home.html i18n.js index.html live.html
+//go:embed auth.js clients.html groups.html home.html i18n.js index.html live.html
 var files embed.FS
 
 func pageHandler(filename string) http.Handler {
@@ -16,7 +16,7 @@ func pageHandler(filename string) http.Handler {
 		if filename == "live.html" {
 			w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'self' https://unpkg.com 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org; connect-src 'self'; font-src 'self'; frame-ancestors 'none'")
 		}
-		if filename == "home.html" || filename == "index.html" || filename == "clients.html" {
+		if filename == "home.html" || filename == "index.html" || filename == "clients.html" || filename == "groups.html" {
 			w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'")
 		}
 		content, err := files.ReadFile(filename)
@@ -39,6 +39,10 @@ func HomeHandler() http.Handler {
 
 func LiveHandler() http.Handler {
 	return pageHandler("live.html")
+}
+
+func GroupsHandler() http.Handler {
+	return pageHandler("groups.html")
 }
 
 func ClientsHandler() http.Handler {

@@ -104,7 +104,7 @@ APK releases are stored as immutable files under `APK_STORAGE_DIR` (default `./d
 
 Flight synchronization stores one maximally compressed `.flight.zip` file per flight under `FLIGHT_LOG_STORAGE_DIR` (default `./data/flights`). The server generates each archive GUID and stores it with the account/flight metadata in `flight_logs`. Mount this directory on persistent storage in production; the database alone is not sufficient to restore synchronized flight records.
 
-APK release management is available only to the ParaBeacon account whose username is `Beacon` (case-insensitive). Sign in through `POST /api/v1/auth/login`, then send the returned bearer token when publishing. Upload a signed APK directly as the request body:
+The `Beacon` account is the root account: the server grants it every permission regardless of group membership. APK release management for other accounts requires the `apk_management` permission. The startup seed creates the `Beacon administrators` group with all built-in permissions and assigns existing `Beacon` accounts (case-insensitive) to it for compatibility. Sign in through `POST /api/v1/auth/login`, then send the returned bearer token when publishing. Upload a signed APK directly as the request body:
 
 ```sh
 curl -X POST http://localhost:8080/api/v1/admin/app/releases \
@@ -119,7 +119,11 @@ The server limits uploads to 512 MiB, verifies the APK archive contains `Android
 
 ### Release management web UI
 
-Open `/release` to use the embedded release management console. Sign in with the ParaBeacon account whose username is `Beacon` (case-insensitive) to publish or delete releases. The console supports signed APK upload, public release history, SHA-256 inspection, downloads, multi-select deletion, and English/Chinese language switching. APK contents are immutable after publishing, while the Beacon account may remove a release. Deleting a release permanently unlinks its APK file from server storage and removes its public metadata; the account-protected endpoint is `DELETE /api/v1/admin/app/releases/{version_code}`. The API reports an error rather than treating a failed file removal as a successful deletion.
+Open `/release` to use the embedded release management console. Sign in with an account assigned to a group containing `apk_management` to publish or delete releases. The console supports signed APK upload, public release history, SHA-256 inspection, downloads, multi-select deletion, and English/Chinese language switching. APK contents are immutable after publishing. Deleting a release permanently unlinks its APK file from server storage and removes its public metadata; the account-protected endpoint is `DELETE /api/v1/admin/app/releases/{version_code}`.
+
+### Account groups and permissions
+
+Open `/groups` with the root `Beacon` account or an account assigned to `account_group_management` to create groups, assign permissions, and assign accounts to groups. Built-in permissions are `apk_management` for APK release management, `xc_route_customization` for XC competition route customization, and `account_group_management` for account-group administration. Permissions are resolved from PostgreSQL on every protected request; access tokens do not carry an authoritative permission snapshot. The group APIs are `GET/POST /api/v1/admin/account-groups`, `PUT /api/v1/admin/account-groups/{group_id}/permissions`, and `PUT /api/v1/admin/accounts/{user_id}/groups`. The current repository does not yet expose XC competition route entities; `xc_route_customization` is seeded and ready for that feature. The API reports an error rather than treating a failed file removal as a successful deletion.
 
 ## Tests and build
 

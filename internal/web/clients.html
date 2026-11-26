@@ -62,7 +62,7 @@
         <h1 data-i18n="title">Installed clients</h1>
         <p class="subtitle" data-i18n="subtitle">Review every client that has reported session metrics, including its latest version, network address, runtime, diagnostics, and event history.</p>
       </div>
-      <div class="header-actions"><a class="button" href="/" data-i18n="home">Home</a><a class="button" href="/release" data-i18n="releases">Releases</a><span data-auth-widget></span><button id="language-toggle" type="button">中文</button><span class="badge" data-i18n="protected">Beacon account access</span></div>
+      <div class="header-actions"><a class="button" href="/" data-i18n="home">Home</a><a class="button" href="/release" data-i18n="releases">Releases</a><a class="button" href="/groups">Account groups</a><span data-auth-widget></span><button id="language-toggle" type="button">中文</button><span class="badge" data-i18n="protected">APK management permission</span></div>
     </header>
 
     <section class="panel">
@@ -70,7 +70,7 @@
       <div id="notice" class="notice" role="status" aria-live="polite"></div>
       <div id="clients"><div class="empty" data-i18n="loading">Loading client inventory…</div></div>
     </section>
-    <footer data-i18n="footer">Client identifiers, addresses, and diagnostics are visible only to the Beacon ParaBeacon Account.</footer>
+    <footer data-i18n="footer">Client identifiers, addresses, and diagnostics are visible only to accounts with APK management permission.</footer>
   </main>
 
   <div id="backdrop" class="drawer-backdrop" hidden></div>
@@ -81,8 +81,8 @@
   <script>
     const $ = (id) => document.getElementById(id);
     const translations = {
-      en: { title:"Installed clients", subtitle:"Review every client that has reported session metrics, including its latest version, network address, runtime, diagnostics, and event history.", home:"Home", releases:"Releases", protected:"Beacon account access", allClients:"All installed clients", loading:"Loading client inventory…", refresh:"Refresh", details:"Client details", footer:"Client identifiers, addresses, and diagnostics are visible only to the Beacon ParaBeacon Account.", hardware:"Hardware ID", account:"Account", version:"Latest version", address:"Latest IP address", clientTime:"Client timestamp", received:"Last received", sessions:"Sessions", events:"Events", runtime:"Total runtime", view:"View details", noClients:"No installed clients have reported metrics yet.", requestFailed:"Request failed ({{status}})", eventHistory:"Event history", noEvents:"No events found.", session:"Session", diagnostics:"Diagnostics", anonymous:"Anonymous", close:"Close", accessRequired:"Sign in with the Beacon ParaBeacon Account to view installed clients." },
-      zh: { title:"已安装客户端", subtitle:"查看所有上报过会话指标的客户端，包括最新版本、网络地址、运行时长、诊断信息和事件历史。", home:"首页", releases:"版本管理", protected:"Beacon 账户权限", allClients:"全部已安装客户端", loading:"正在加载客户端清单…", refresh:"刷新", details:"客户端详情", footer:"硬件标识、地址和诊断信息仅对 Beacon ParaBeacon 账户可见。", hardware:"硬件 ID", account:"账户", version:"最新版本", address:"最新 IP 地址", clientTime:"客户端时间", received:"最近上报", sessions:"会话数", events:"事件数", runtime:"累计运行时长", view:"查看详情", noClients:"还没有客户端上报指标。", requestFailed:"请求失败（{{status}}）", eventHistory:"事件历史", noEvents:"未找到事件。", session:"会话", diagnostics:"诊断信息", anonymous:"匿名", close:"关闭", accessRequired:"登录 Beacon ParaBeacon 账户后才能查看已安装客户端。" }
+      en: { title:"Installed clients", subtitle:"Review every client that has reported session metrics, including its latest version, network address, runtime, diagnostics, and event history.", home:"Home", releases:"Releases", protected:"APK management permission", allClients:"All installed clients", loading:"Loading client inventory…", refresh:"Refresh", details:"Client details", footer:"Client identifiers, addresses, and diagnostics are visible only to accounts with APK management permission.", hardware:"Hardware ID", account:"Account", version:"Latest version", address:"Latest IP address", clientTime:"Client timestamp", received:"Last received", sessions:"Sessions", events:"Events", runtime:"Total runtime", view:"View details", noClients:"No installed clients have reported metrics yet.", requestFailed:"Request failed ({{status}})", eventHistory:"Event history", noEvents:"No events found.", session:"Session", diagnostics:"Diagnostics", anonymous:"Anonymous", close:"Close", accessRequired:"Sign in with the Beacon ParaBeacon Account to view installed clients." },
+      zh: { title:"已安装客户端", subtitle:"查看所有上报过会话指标的客户端，包括最新版本、网络地址、运行时长、诊断信息和事件历史。", home:"首页", releases:"版本管理", protected:"APK 管理权限", allClients:"全部已安装客户端", loading:"正在加载客户端清单…", refresh:"刷新", details:"客户端详情", footer:"硬件标识、地址和诊断信息仅对拥有 APK 管理权限的账户可见。", hardware:"硬件 ID", account:"账户", version:"最新版本", address:"最新 IP 地址", clientTime:"客户端时间", received:"最近上报", sessions:"会话数", events:"事件数", runtime:"累计运行时长", view:"查看详情", noClients:"还没有客户端上报指标。", requestFailed:"请求失败（{{status}}）", eventHistory:"事件历史", noEvents:"未找到事件。", session:"会话", diagnostics:"诊断信息", anonymous:"匿名", close:"关闭", accessRequired:"登录 Beacon ParaBeacon 账户后才能查看已安装客户端。" }
     };
     let language = window.localStorage.getItem("parabeacon-language") === "zh" ? "zh" : ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
     const t = (key, values = {}) => Object.entries(values).reduce((text, [name, value]) => text.split(`{{${name}}}`).join(String(value)), (translations[language] || translations.en)[key] || key);

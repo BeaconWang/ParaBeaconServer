@@ -9,6 +9,7 @@ import (
 	"github.com/parabeacon/server/internal/config"
 	"github.com/parabeacon/server/internal/handler"
 	"github.com/parabeacon/server/internal/middleware"
+	"github.com/parabeacon/server/internal/model"
 	"github.com/parabeacon/server/internal/realtime"
 	"github.com/parabeacon/server/internal/repository"
 	"github.com/parabeacon/server/internal/service"
@@ -41,6 +42,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	releasePage := gin.WrapH(webapp.Handler())
 	livePage := gin.WrapH(webapp.LiveHandler())
 	clientsPage := gin.WrapH(webapp.ClientsHandler())
+	groupsPage := gin.WrapH(webapp.GroupsHandler())
 	i18nScript := gin.WrapH(webapp.I18nScriptHandler())
 	authScript := gin.WrapH(webapp.AuthScriptHandler())
 	engine.GET("/", homePage)
@@ -52,6 +54,8 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	engine.GET("/live/", livePage)
 	engine.GET("/clients", clientsPage)
 	engine.GET("/clients/", clientsPage)
+	engine.GET("/groups", groupsPage)
+	engine.GET("/groups/", groupsPage)
 	engine.GET("/assets/i18n.js", i18nScript)
 	engine.GET("/assets/auth.js", authScript)
 	engine.GET("/healthz", func(c *gin.Context) {
@@ -113,6 +117,8 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		return nil, err
 	}
 	appReleaseHandler := handler.NewAppReleaseHandler(appReleaseService)
+	accountGroupRepository := repository.NewAccountGroupRepository(db)
+	accountGroupHandler := handler.NewAccountGroupHandler(accountGroupRepository)
 	sessionMetricsHandler := handler.NewSessionMetricsHandler(
 		service.NewSessionMetricsService(repository.NewSessionMetricRepository(db)),
 		middleware.NewFixedWindowLimiter(120, time.Minute, 10000),
@@ -129,12 +135,18 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		v1.GET("/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), appReleaseHandler.List)
 		v1.GET("/app/releases/latest", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), appReleaseHandler.Latest)
 		v1.GET("/app/releases/:version_code/download", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), appReleaseHandler.Download)
-		beaconReleaseAuth := middleware.RequireBeaconAccount(tokens, repository.NewUserRepository(db), repository.NewRefreshTokenRepository(db))
-		v1.GET("/admin/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), beaconReleaseAuth, appReleaseHandler.List)
-		v1.DELETE("/admin/app/releases/:version_code", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), beaconReleaseAuth, appReleaseHandler.Delete)
-		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), beaconReleaseAuth, appReleaseHandler.Publish)
-		v1.GET("/admin/clients", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), beaconReleaseAuth, sessionMetricsHandler.ListInstalledClients)
-		v1.GET("/admin/clients/:hardware_id", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), beaconReleaseAuth, sessionMetricsHandler.GetInstalledClient)
+		refreshTokenRepository := repository.NewRefreshTokenRepository(db)
+		apkManagementAuth := middleware.RequirePermission(tokens, accountGroupRepository, model.PermissionAPKManagement, refreshTokenRepository)
+		groupManagementAuth := middleware.RequirePermission(tokens, accountGroupRepository, model.PermissionAccountGroupManagement, refreshTokenRepository)
+		v1.GET("/admin/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), apkManagementAuth, appReleaseHandler.List)
+		v1.DELETE("/admin/app/releases/:version_code", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), apkManagementAuth, appReleaseHandler.Delete)
+		v1.POST("/admin/app/releases", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), apkManagementAuth, appReleaseHandler.Publish)
+		v1.GET("/admin/clients", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), apkManagementAuth, sessionMetricsHandler.ListInstalledClients)
+		v1.GET("/admin/clients/:hardware_id", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), apkManagementAuth, sessionMetricsHandler.GetInstalledClient)
+		v1.GET("/admin/account-groups", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), groupManagementAuth, accountGroupHandler.List)
+		v1.POST("/admin/account-groups", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), groupManagementAuth, accountGroupHandler.Create)
+		v1.PUT("/admin/account-groups/:group_id/permissions", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), groupManagementAuth, accountGroupHandler.UpdatePermissions)
+		v1.PUT("/admin/accounts/:user_id/groups", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), groupManagementAuth, accountGroupHandler.SetAccountGroups)
 		v1.GET("/map/active-locations", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), trackingHandler.ListPublicLocations)
 		v1.GET("/profile-images/:image_key", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), profileImageHandler.Get)
 		v1.POST("/metrics/session", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), middleware.OptionalAuth(tokens, repository.NewRefreshTokenRepository(db)), sessionMetricsHandler.Ingest)
@@ -142,6 +154,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected := v1.Group("")
 		protected.Use(middleware.RequireAuth(tokens, repository.NewRefreshTokenRepository(db)))
 		protected.GET("/user/profile", userHandler.Profile)
+		protected.GET("/user/permissions", accountGroupHandler.MyPermissions)
 		protected.PATCH("/user/profile", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), userHandler.UpdateProfile)
 		protected.POST("/user/profile-image", middleware.NewFixedWindowLimiter(10, time.Hour, 10000).Middleware(), profileImageHandler.Upload)
 		protected.DELETE("/user/profile-image", middleware.NewFixedWindowLimiter(10, time.Hour, 10000).Middleware(), profileImageHandler.Remove)

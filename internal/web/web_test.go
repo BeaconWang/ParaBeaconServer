@@ -38,6 +38,23 @@ func TestReleasePageSupportsBeaconAccountPublishing(t *testing.T) {
 	}
 }
 
+func TestGroupsHandlerServesAccountGroupsPageWithSecurityPolicy(t *testing.T) {
+	request := httptest.NewRequest("GET", "/groups", nil)
+	response := httptest.NewRecorder()
+	GroupsHandler().ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Security-Policy"); got == "" {
+		t.Fatal("groups page has no content security policy")
+	}
+	for _, marker := range []string{"Account groups", "apk_management", "xc_route_customization", "/api/v1/admin/account-groups"} {
+		if !strings.Contains(response.Body.String(), marker) {
+			t.Errorf("groups page does not contain %q", marker)
+		}
+	}
+}
+
 func TestClientsHandlerServesInstalledClientPageWithSecurityPolicy(t *testing.T) {
 	request := httptest.NewRequest("GET", "/clients", nil)
 	response := httptest.NewRecorder()
