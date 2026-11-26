@@ -31,7 +31,7 @@ type TrackingRepository interface {
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
-	ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
+	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
 	ListPublicTrackPoints(ctx context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error)
 }
 
@@ -91,7 +91,7 @@ func (s *TrackingService) SetPublicSharing(ctx context.Context, userID, sessionI
 	return s.tracking.SetPublicSharing(ctx, userID, sessionID, enabled)
 }
 
-func (s *TrackingService) ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error) {
+func (s *TrackingService) ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error) {
 	if !finiteInRange(south, -90, 90) ||
 		!finiteInRange(north, -90, 90) ||
 		!finiteInRange(west, -180, 180) ||
@@ -104,6 +104,7 @@ func (s *TrackingService) ListPublicLocations(ctx context.Context, userID uuid.U
 	locations, err := s.tracking.ListPublicLocations(
 		ctx,
 		userID,
+		taskOwnerID,
 		south,
 		north,
 		west,

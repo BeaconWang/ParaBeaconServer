@@ -24,6 +24,7 @@ type trackingHandlerTestService struct {
 	west          float64
 	east          float64
 	after         uuid.UUID
+	taskOwnerID   uuid.UUID
 	locations     []model.PublicPilotLocation
 }
 
@@ -52,8 +53,9 @@ func (s *trackingHandlerTestService) SetPublicSharing(_ context.Context, userID,
 	return nil
 }
 
-func (s *trackingHandlerTestService) ListPublicLocations(_ context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error) {
+func (s *trackingHandlerTestService) ListPublicLocations(_ context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error) {
 	s.userID = userID
+	s.taskOwnerID = taskOwnerID
 	s.south, s.north, s.west, s.east, s.after = south, north, west, east, after
 	return s.locations, nil
 }
@@ -90,7 +92,8 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 		c.Set(middleware.AuthenticatedUserIDKey, userID)
 		NewTrackingHandler(service).ListPublicLocations(c)
 	})
-	request := httptest.NewRequest(http.MethodGet, "/map/active-locations?west=8&south=47&east=9&north=48", nil)
+	taskOwnerID := uuid.New()
+	request := httptest.NewRequest(http.MethodGet, "/map/active-locations?west=8&south=47&east=9&north=48&task_owner_id="+taskOwnerID.String(), nil)
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -98,6 +101,9 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	}
 	if service.userID != userID {
 		t.Fatalf("requester id = %s, want %s", service.userID, userID)
+	}
+	if service.taskOwnerID != taskOwnerID {
+		t.Fatalf("task owner filter = %s, want %s", service.taskOwnerID, taskOwnerID)
 	}
 	if service.south != 47 || service.north != 48 || service.west != 8 || service.east != 9 {
 		t.Fatalf("bounds = %v %v %v %v", service.south, service.north, service.west, service.east)

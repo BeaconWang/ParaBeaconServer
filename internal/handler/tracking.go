@@ -20,7 +20,7 @@ type TrackingService interface {
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
-	ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error)
+	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error)
 }
 
 type TrackingPointObserver interface {
@@ -109,6 +109,15 @@ func (h *TrackingHandler) ListPublicLocations(c *gin.Context) {
 		respondError(c, http.StatusBadRequest, "invalid map bounds")
 		return
 	}
+	var taskOwnerID uuid.UUID
+	if rawTaskOwnerID := c.Query("task_owner_id"); rawTaskOwnerID != "" {
+		parsed, err := uuid.Parse(rawTaskOwnerID)
+		if err != nil || parsed == uuid.Nil {
+			respondError(c, http.StatusBadRequest, "invalid task owner")
+			return
+		}
+		taskOwnerID = parsed
+	}
 	var after uuid.UUID
 	if cursor := c.Query("cursor"); cursor != "" {
 		parsed, err := uuid.Parse(cursor)
@@ -118,7 +127,7 @@ func (h *TrackingHandler) ListPublicLocations(c *gin.Context) {
 		}
 		after = parsed
 	}
-	locations, err := h.tracking.ListPublicLocations(c.Request.Context(), userID, south, north, west, east, after)
+	locations, err := h.tracking.ListPublicLocations(c.Request.Context(), userID, taskOwnerID, south, north, west, east, after)
 	if err != nil {
 		respondTrackingError(c, err)
 		return

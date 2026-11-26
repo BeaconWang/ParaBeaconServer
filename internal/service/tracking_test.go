@@ -61,6 +61,7 @@ type trackingTestRepository struct {
 	sharingID            uuid.UUID
 	sharing              bool
 	queryUserID          uuid.UUID
+	taskOwnerID          uuid.UUID
 	bounds               [4]float64
 	after                uuid.UUID
 	limit                int
@@ -100,8 +101,9 @@ func (r *trackingTestRepository) SetPublicSharing(_ context.Context, userID, ses
 	return nil
 }
 
-func (r *trackingTestRepository) ListPublicLocations(_ context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error) {
+func (r *trackingTestRepository) ListPublicLocations(_ context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error) {
 	r.queryUserID = userID
+	r.taskOwnerID = taskOwnerID
 	r.listCalled = true
 	r.bounds = [4]float64{south, north, west, east}
 	r.after = after
@@ -143,15 +145,16 @@ func TestListPublicLocationsValidatesAndBoundsResults(t *testing.T) {
 	tracking := NewTrackingService(repository)
 	after := uuid.New()
 	requesterID := uuid.New()
+	taskOwnerID := uuid.New()
 
-	locations, err := tracking.ListPublicLocations(context.Background(), requesterID, -10, 10, 170, -170, after)
+	locations, err := tracking.ListPublicLocations(context.Background(), requesterID, taskOwnerID, -10, 10, 170, -170, after)
 	if err != nil {
 		t.Fatalf("ListPublicLocations() error = %v", err)
 	}
 	if len(locations) != 1 || !repository.listCalled {
 		t.Fatalf("locations = %#v; repository called = %v", locations, repository.listCalled)
 	}
-	if repository.queryUserID != requesterID || repository.bounds != [4]float64{-10, 10, 170, -170} || repository.after != after {
+	if repository.queryUserID != requesterID || repository.taskOwnerID != taskOwnerID || repository.bounds != [4]float64{-10, 10, 170, -170} || repository.after != after {
 		t.Fatalf("query bounds/cursor = %#v / %s", repository.bounds, repository.after)
 	}
 	if repository.limit != PublicLocationPageSize {
@@ -181,7 +184,7 @@ func TestListPublicLocationsAttachesOnlyBoundedPublicTrailData(t *testing.T) {
 	}
 	tracking := NewTrackingService(repository)
 
-	locations, err := tracking.ListPublicLocations(context.Background(), uuid.New(), -10, 10, 170, -170, uuid.Nil)
+	locations, err := tracking.ListPublicLocations(context.Background(), uuid.New(), uuid.Nil, -10, 10, 170, -170, uuid.Nil)
 	if err != nil {
 		t.Fatalf("ListPublicLocations() error = %v", err)
 	}
@@ -204,7 +207,7 @@ func TestListPublicLocationsAttachesOnlyBoundedPublicTrailData(t *testing.T) {
 func TestListPublicLocationsRejectsInvalidBounds(t *testing.T) {
 	repository := &trackingTestRepository{}
 	tracking := NewTrackingService(repository)
-	if _, err := tracking.ListPublicLocations(context.Background(), uuid.New(), 20, 10, 0, 1, uuid.Nil); err != ErrInvalidTrackingData {
+	if _, err := tracking.ListPublicLocations(context.Background(), uuid.New(), uuid.Nil, 20, 10, 0, 1, uuid.Nil); err != ErrInvalidTrackingData {
 		t.Fatalf("invalid bounds error = %v, want ErrInvalidTrackingData", err)
 	}
 	if repository.listCalled {

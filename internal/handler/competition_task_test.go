@@ -73,8 +73,9 @@ func TestCompetitionTaskReplaceUsesAuthenticatedAccountAndListHidesOwner(t *test
 		t.Fatal("server list exposed the task owner's ID")
 	}
 	if string(payload.Tasks[0]["username"]) != `"pilot-one"` ||
-		string(payload.Tasks[0]["display_name"]) != `"Pilot One"` {
-		t.Fatalf("server list owner fields = %s / %s", payload.Tasks[0]["username"], payload.Tasks[0]["display_name"])
+		string(payload.Tasks[0]["display_name"]) != `"Pilot One"` ||
+		string(payload.Tasks[0]["owner_id"]) != `"`+userID.String()+`"` {
+		t.Fatalf("server list owner fields = %s / %s / %s", payload.Tasks[0]["username"], payload.Tasks[0]["display_name"], payload.Tasks[0]["owner_id"])
 	}
 }
 

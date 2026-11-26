@@ -22,7 +22,7 @@ type TrackingRepository interface {
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
-	ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
+	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
 	ListPublicTrackPoints(ctx context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error)
 }
 
@@ -107,7 +107,7 @@ func (r *GormTrackingRepository) SetPublicSharing(ctx context.Context, userID, s
 	return nil
 }
 
-func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error) {
+func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error) {
 	locations := make([]model.PublicPilotLocation, 0, limit)
 	query := r.db.WithContext(ctx).
 		Table("live_track_sessions AS s").
@@ -129,6 +129,10 @@ func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID
 		query = query.Where("latest.longitude BETWEEN ? AND ?", west, east)
 	} else {
 		query = query.Where("(latest.longitude >= ? OR latest.longitude <= ?)", west, east)
+	}
+	if taskOwnerID != uuid.Nil {
+		query = query.Joins("JOIN competition_tasks AS ct ON ct.user_id = s.user_id").
+			Where("ct.user_id = ?", taskOwnerID)
 	}
 	if after != uuid.Nil {
 		query = query.Where("s.id > ?", after)

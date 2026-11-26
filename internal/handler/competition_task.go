@@ -84,6 +84,7 @@ func (h *CompetitionTaskHandler) List(c *gin.Context) {
 			UpdatedAt:   task.UpdatedAt,
 			Username:    task.Username,
 			DisplayName: task.DisplayName,
+			OwnerID:     task.UserID,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"tasks": entries})
@@ -94,6 +95,7 @@ type competitionTaskResponse struct {
 	UpdatedAt   time.Time       `json:"updated_at"`
 	Username    string          `json:"username"`
 	DisplayName string          `json:"display_name"`
+	OwnerID     uuid.UUID       `json:"owner_id"`
 }
 
 func competitionTaskUserID(c *gin.Context) (uuid.UUID, bool) {
