@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ParaBeacon Clients</title>
+  <style>
+    :root { color-scheme:dark; --bg:#07111f; --panel:#102039; --panel-2:#172b45; --line:#2b4666; --muted:#9aacc5; --text:#f3f7ff; --accent:#70e7c0; --accent-2:#8ca7ff; --danger:#ff9cab; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100dvh; color:var(--text); background:radial-gradient(circle at 78% -12%, #254c75 0, transparent 34rem), radial-gradient(circle at -8% 60%, #123b53 0, transparent 30rem), var(--bg); font:15px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    main { width:min(1260px, calc(100% - 48px)); min-height:100dvh; margin:0 auto; padding:32px 0 70px; }
+    header { display:flex; align-items:flex-start; justify-content:space-between; gap:24px; margin-bottom:28px; }
+    .eyebrow { color:var(--accent); font-size:12px; font-weight:800; letter-spacing:.2em; text-transform:uppercase; }
+    h1 { margin:8px 0 0; font-size:clamp(36px, 5vw, 64px); line-height:1; letter-spacing:-.06em; }
+    h2 { margin:0; font-size:21px; letter-spacing:-.03em; }
+    .subtitle { max-width:730px; margin:16px 0 0; color:var(--muted); font-size:17px; line-height:1.6; }
+    .header-actions, .toolbar { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
+    button, .button { border:1px solid var(--line); border-radius:12px; padding:11px 14px; color:var(--text); background:var(--panel-2); font:inherit; font-weight:800; cursor:pointer; text-decoration:none; }
+    button:hover, .button:hover { border-color:var(--accent-2); filter:brightness(1.08); }
+    button:disabled { cursor:wait; opacity:.55; }
+    .primary { border-color:transparent; color:#06131a; background:var(--accent); }
+    .badge { display:inline-flex; align-items:center; gap:8px; padding:10px 12px; border:1px solid #70e7c033; border-radius:999px; color:var(--accent); background:#0b192bcc; white-space:nowrap; }
+    .badge::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 14px var(--accent); }
+    .panel { border:1px solid var(--line); border-radius:24px; background:linear-gradient(145deg, #172d49ee, #0d192bee); box-shadow:0 28px 80px #0000002e; padding:26px; }
+    .panel-header { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }
+    .count { color:var(--muted); font-size:13px; }
+    .notice { min-height:24px; margin:10px 0; color:var(--muted); font-size:13px; }
+    .notice.error { color:var(--danger); }
+    .empty { padding:35px 0; color:var(--muted); text-align:center; }
+    .table-wrap { overflow:auto; }
+    table { width:100%; border-collapse:collapse; }
+    th, td { padding:14px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; }
+    td { font-size:14px; }
+    td code, code { color:#c2d0ff; font:12px ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap:anywhere; }
+    .client-id { display:block; max-width:220px; }
+    .muted { color:var(--muted); }
+    .detail-button { padding:7px 10px; color:var(--accent); background:transparent; }
+    .drawer-backdrop { position:fixed; z-index:19; inset:0; background:#05091499; backdrop-filter:blur(2px); }
+    .drawer { position:fixed; z-index:20; top:0; right:0; width:min(650px, 94vw); height:100vh; padding:26px; overflow:auto; border-left:1px solid var(--line); background:linear-gradient(145deg, #172d49, #0d192b); box-shadow:-24px 0 60px #00000055; }
+    .drawer-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:22px; }
+    .drawer-header h2 { overflow-wrap:anywhere; }
+    .icon-button { width:38px; height:38px; padding:0; font-size:22px; }
+    .facts { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin:18px 0 26px; }
+    .fact { min-width:0; padding:12px; border:1px solid var(--line); border-radius:13px; background:#0b1728aa; }
+    .fact-label { color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; }
+    .fact-value { margin-top:4px; overflow-wrap:anywhere; }
+    .event { margin-top:12px; padding:15px; border:1px solid var(--line); border-radius:15px; background:#0b1728aa; }
+    .event-head { display:flex; justify-content:space-between; gap:12px; margin-bottom:10px; }
+    .event-meta { color:var(--muted); font-size:12px; }
+    pre { max-height:220px; margin:10px 0 0; padding:10px; overflow:auto; border-radius:9px; color:#c2d0ff; background:#06101d; font:12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+    footer { margin-top:26px; color:var(--muted); font-size:12px; }
+    @media (max-width:780px) { main { width:min(100% - 28px, 640px); padding-top:24px; } header { display:block; } .header-actions { justify-content:flex-start; margin-top:20px; } .panel { padding:20px; } .facts { grid-template-columns:1fr; } table { min-width:980px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <div class="eyebrow">ParaBeacon / Client inventory</div>
+        <h1 data-i18n="title">Installed clients</h1>
+        <p class="subtitle" data-i18n="subtitle">Review every client that has reported session metrics, including its latest version, network address, runtime, diagnostics, and event history.</p>
+      </div>
+      <div class="header-actions"><a class="button" href="/" data-i18n="home">Home</a><a class="button" href="/release" data-i18n="releases">Releases</a><span data-auth-widget></span><button id="language-toggle" type="button">中文</button><span class="badge" data-i18n="protected">Beacon account access</span></div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-header"><div><h2 data-i18n="allClients">All installed clients</h2><div id="count" class="count" data-i18n="loading">Loading client inventory…</div></div><div class="toolbar"><button id="refresh" class="primary" type="button" data-i18n="refresh">Refresh</button></div></div>
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      <div id="clients"><div class="empty" data-i18n="loading">Loading client inventory…</div></div>
+    </section>
+    <footer data-i18n="footer">Client identifiers, addresses, and diagnostics are visible only to the Beacon ParaBeacon Account.</footer>
+  </main>
+
+  <div id="backdrop" class="drawer-backdrop" hidden></div>
+  <aside id="drawer" class="drawer" hidden aria-labelledby="drawer-title"><div class="drawer-header"><h2 id="drawer-title" data-i18n="details">Client details</h2><button id="close" class="icon-button" type="button" aria-label="Close">×</button></div><div id="detail"><div class="empty" data-i18n="loading">Loading client details…</div></div></aside>
+
+  <script src="/assets/i18n.js"></script>
+  <script src="/assets/auth.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const translations = {
+      en: { title:"Installed clients", subtitle:"Review every client that has reported session metrics, including its latest version, network address, runtime, diagnostics, and event history.", home:"Home", releases:"Releases", protected:"Beacon account access", allClients:"All installed clients", loading:"Loading client inventory…", refresh:"Refresh", details:"Client details", footer:"Client identifiers, addresses, and diagnostics are visible only to the Beacon ParaBeacon Account.", hardware:"Hardware ID", account:"Account", version:"Latest version", address:"Latest IP address", clientTime:"Client timestamp", received:"Last received", sessions:"Sessions", events:"Events", runtime:"Total runtime", view:"View details", noClients:"No installed clients have reported metrics yet.", requestFailed:"Request failed ({{status}})", eventHistory:"Event history", noEvents:"No events found.", session:"Session", diagnostics:"Diagnostics", anonymous:"Anonymous", close:"Close", accessRequired:"Sign in with the Beacon ParaBeacon Account to view installed clients." },
+      zh: { title:"已安装客户端", subtitle:"查看所有上报过会话指标的客户端，包括最新版本、网络地址、运行时长、诊断信息和事件历史。", home:"首页", releases:"版本管理", protected:"Beacon 账户权限", allClients:"全部已安装客户端", loading:"正在加载客户端清单…", refresh:"刷新", details:"客户端详情", footer:"硬件标识、地址和诊断信息仅对 Beacon ParaBeacon 账户可见。", hardware:"硬件 ID", account:"账户", version:"最新版本", address:"最新 IP 地址", clientTime:"客户端时间", received:"最近上报", sessions:"会话数", events:"事件数", runtime:"累计运行时长", view:"查看详情", noClients:"还没有客户端上报指标。", requestFailed:"请求失败（{{status}}）", eventHistory:"事件历史", noEvents:"未找到事件。", session:"会话", diagnostics:"诊断信息", anonymous:"匿名", close:"关闭", accessRequired:"登录 Beacon ParaBeacon 账户后才能查看已安装客户端。" }
+    };
+    let language = window.localStorage.getItem("parabeacon-language") === "zh" ? "zh" : ((navigator.language || "").toLowerCase().startsWith("zh") ? "zh" : "en");
+    const t = (key, values = {}) => Object.entries(values).reduce((text, [name, value]) => text.split(`{{${name}}}`).join(String(value)), (translations[language] || translations.en)[key] || key);
+    const esc = (value) => String(value ?? "").replace(/[&<>\"']/g, (character) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" })[character]);
+    const formatDate = (value) => value ? new Date(value).toLocaleString(language === "zh" ? "zh-CN" : "en-US", { dateStyle:"medium", timeStyle:"short" }) : "—";
+    const formatDuration = (seconds) => { const value = Number(seconds || 0); const days = Math.floor(value / 86400); const hours = Math.floor((value % 86400) / 3600); const minutes = Math.floor((value % 3600) / 60); return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`; };
+    const api = async (path) => { const headers = window.ParaBeaconAuth ? window.ParaBeaconAuth.authHeaders({ Accept:"application/json" }) : new Headers({ Accept:"application/json" }); const response = await fetch(path, { headers, cache:"no-store" }); let body = {}; try { body = await response.json(); } catch (_) {} if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? t("accessRequired") : (body.error || t("requestFailed", { status:response.status }))); return body; };
+    const applyLanguage = () => { document.documentElement.lang = language; document.title = `ParaBeacon · ${t("title")}`; document.querySelectorAll("[data-i18n]").forEach((element) => { element.textContent = t(element.dataset.i18n); }); $("language-toggle").textContent = language === "en" ? "中文" : "English"; $("close").setAttribute("aria-label", t("close")); };
+    const renderClients = (clients) => { $("count").textContent = `${clients.length} ${t("allClients").toLowerCase()}`; if (!clients.length) { $("clients").innerHTML = `<div class="empty">${t("noClients")}</div>`; return; } $("clients").innerHTML = `<div class="table-wrap"><table><thead><tr><th>${t("hardware")}</th><th>${t("account")}</th><th>${t("version")}</th><th>${t("address")}</th><th>${t("sessions")}</th><th>${t("events")}</th><th>${t("runtime")}</th><th>${t("received")}</th><th></th></tr></thead><tbody>${clients.map((client) => `<tr><td><code class="client-id">${esc(client.hardware_id)}</code></td><td>${esc(client.username || t("anonymous"))}</td><td>${esc(client.app_version)}</td><td><code>${esc(client.client_ip)}</code></td><td>${Number(client.session_count || 0)}</td><td>${Number(client.event_count || 0)}</td><td>${formatDuration(client.total_runtime_sec)}</td><td>${esc(formatDate(client.server_received_at))}</td><td><button class="detail-button" type="button" data-hardware-id="${esc(client.hardware_id)}">${t("view")}</button></td></tr>`).join("")}</tbody></table></div>`; };
+    const renderDetail = (client) => { const facts = [[t("hardware"), client.hardware_id], [t("account"), client.username || t("anonymous")], [t("version"), client.app_version], [t("address"), client.client_ip], [t("clientTime"), formatDate(client.client_timestamp)], [t("received"), formatDate(client.server_received_at)], [t("sessions"), client.session_count], [t("events"), client.event_count], [t("runtime"), formatDuration(client.total_runtime_sec)]]; $("detail").innerHTML = `<div class="facts">${facts.map(([label, value]) => `<div class="fact"><div class="fact-label">${esc(label)}</div><div class="fact-value">${esc(value)}</div></div>`).join("")}</div><h2>${t("eventHistory")}</h2>${client.events && client.events.length ? client.events.map((event) => `<article class="event"><div class="event-head"><strong>${esc(event.app_version)}</strong><span class="event-meta">${esc(formatDate(event.server_received_at))}</span></div><div class="event-meta">${t("session")}: <code>${esc(event.session_id)}</code> · ${formatDuration(event.run_time_sec)} · <code>${esc(event.client_ip)}</code></div><pre>${esc(event.diagnostics || "{}")}</pre></article>`).join("") : `<div class="empty">${t("noEvents")}</div>`}`; };
+    const openDetail = async (hardwareID) => { $("drawer").hidden = false; $("backdrop").hidden = false; $("detail").innerHTML = `<div class="empty">${t("loading")}</div>`; try { renderDetail(await api(`/api/v1/admin/clients/${encodeURIComponent(hardwareID)}?event_limit=100`)); } catch (error) { $("detail").innerHTML = `<div class="empty">${esc(error.message)}</div>`; } };
+    const load = async () => { $("notice").textContent = ""; try { const body = await api("/api/v1/admin/clients?limit=200"); renderClients(body.clients || []); } catch (error) { $("count").textContent = ""; $("clients").innerHTML = `<div class="empty">${esc(error.message)}</div>`; $("notice").textContent = error.message; $("notice").className = "notice error"; } };
+    $("clients").addEventListener("click", (event) => { const button = event.target.closest("[data-hardware-id]"); if (button) openDetail(button.dataset.hardwareId); });
+    const close = () => { $("drawer").hidden = true; $("backdrop").hidden = true; };
+    $("close").addEventListener("click", close); $("backdrop").addEventListener("click", close); document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); }); $("refresh").addEventListener("click", load);
+    $("language-toggle").addEventListener("click", () => { language = language === "en" ? "zh" : "en"; window.localStorage.setItem("parabeacon-language", language); applyLanguage(); load(); });
+    window.addEventListener("parabeacon-auth-changed", load); applyLanguage(); load();
+  </script>
+</body>
+</html>

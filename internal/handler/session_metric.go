@@ -24,8 +24,14 @@ type SessionMetricIngestor interface {
 	Ingest(ctx context.Context, event *model.SessionMetricEvent) error
 }
 
+type InstalledClientReader interface {
+	ListInstalledClients(ctx context.Context, limit int) ([]model.InstalledClient, error)
+	GetInstalledClient(ctx context.Context, hardwareID uuid.UUID, eventLimit int) (*model.InstalledClientDetail, error)
+}
+
 type SessionMetricsHandler struct {
 	ingestor        SessionMetricIngestor
+	reader          InstalledClientReader
 	hardwareLimiter *middleware.FixedWindowLimiter
 	sessionLimiter  *middleware.FixedWindowLimiter
 }
@@ -47,11 +53,69 @@ func NewSessionMetricsHandler(
 	hardwareLimiter *middleware.FixedWindowLimiter,
 	sessionLimiter *middleware.FixedWindowLimiter,
 ) *SessionMetricsHandler {
+	reader, _ := ingestor.(InstalledClientReader)
 	return &SessionMetricsHandler{
 		ingestor:        ingestor,
+		reader:          reader,
 		hardwareLimiter: hardwareLimiter,
 		sessionLimiter:  sessionLimiter,
 	}
+}
+
+func (h *SessionMetricsHandler) ListInstalledClients(c *gin.Context) {
+	if h.reader == nil {
+		respondError(c, http.StatusNotImplemented, "installed client inventory unavailable")
+		return
+	}
+	limit, ok := queryLimit(c, "limit", 100, 200)
+	if !ok {
+		return
+	}
+	clients, err := h.reader.ListInstalledClients(c.Request.Context(), limit)
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "unable to load installed clients")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"clients": clients, "count": len(clients)})
+}
+
+func (h *SessionMetricsHandler) GetInstalledClient(c *gin.Context) {
+	if h.reader == nil {
+		respondError(c, http.StatusNotImplemented, "installed client inventory unavailable")
+		return
+	}
+	hardwareID, err := uuid.Parse(strings.TrimSpace(c.Param("hardware_id")))
+	if err != nil || hardwareID == uuid.Nil {
+		respondError(c, http.StatusBadRequest, "invalid hardware id")
+		return
+	}
+	eventLimit, ok := queryLimit(c, "event_limit", 100, 200)
+	if !ok {
+		return
+	}
+	client, err := h.reader.GetInstalledClient(c.Request.Context(), hardwareID, eventLimit)
+	if errors.Is(err, service.ErrInstalledClientNotFound) {
+		respondError(c, http.StatusNotFound, "installed client not found")
+		return
+	}
+	if err != nil {
+		respondError(c, http.StatusInternalServerError, "unable to load installed client")
+		return
+	}
+	c.JSON(http.StatusOK, client)
+}
+
+func queryLimit(c *gin.Context, name string, fallback, maximum int) (int, bool) {
+	value := strings.TrimSpace(c.Query(name))
+	if value == "" {
+		return fallback, true
+	}
+	limit, err := strconv.Atoi(value)
+	if err != nil || limit < 1 || limit > maximum {
+		respondError(c, http.StatusBadRequest, name+" must be between 1 and "+strconv.Itoa(maximum))
+		return 0, false
+	}
+	return limit, true
 }
 
 func (h *SessionMetricsHandler) Ingest(c *gin.Context) {

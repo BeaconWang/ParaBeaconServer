@@ -10,9 +10,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/model"
+	"gorm.io/gorm"
 )
 
 var ErrInvalidSessionMetric = errors.New("invalid session metric")
+var ErrInstalledClientReaderUnavailable = errors.New("installed client reader unavailable")
+var ErrInstalledClientNotFound = errors.New("installed client not found")
 
 const (
 	MaxSessionMetricRuntimeSec       = int64(10 * 365 * 24 * 60 * 60)
@@ -23,12 +26,37 @@ type SessionMetricRepository interface {
 	Ingest(ctx context.Context, event *model.SessionMetricEvent) error
 }
 
+type InstalledClientReader interface {
+	ListInstalledClients(ctx context.Context, limit int) ([]model.InstalledClient, error)
+	GetInstalledClient(ctx context.Context, hardwareID uuid.UUID, eventLimit int) (*model.InstalledClientDetail, error)
+}
+
 type SessionMetricsService struct {
 	repository SessionMetricRepository
+	reader     InstalledClientReader
 }
 
 func NewSessionMetricsService(repository SessionMetricRepository) *SessionMetricsService {
-	return &SessionMetricsService{repository: repository}
+	reader, _ := repository.(InstalledClientReader)
+	return &SessionMetricsService{repository: repository, reader: reader}
+}
+
+func (s *SessionMetricsService) ListInstalledClients(ctx context.Context, limit int) ([]model.InstalledClient, error) {
+	if s.reader == nil {
+		return nil, ErrInstalledClientReaderUnavailable
+	}
+	return s.reader.ListInstalledClients(ctx, limit)
+}
+
+func (s *SessionMetricsService) GetInstalledClient(ctx context.Context, hardwareID uuid.UUID, eventLimit int) (*model.InstalledClientDetail, error) {
+	if s.reader == nil {
+		return nil, ErrInstalledClientReaderUnavailable
+	}
+	client, err := s.reader.GetInstalledClient(ctx, hardwareID, eventLimit)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrInstalledClientNotFound
+	}
+	return client, err
 }
 
 func (s *SessionMetricsService) Ingest(ctx context.Context, event *model.SessionMetricEvent) error {

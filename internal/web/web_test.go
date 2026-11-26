@@ -38,6 +38,23 @@ func TestReleasePageSupportsBeaconAccountPublishing(t *testing.T) {
 	}
 }
 
+func TestClientsHandlerServesInstalledClientPageWithSecurityPolicy(t *testing.T) {
+	request := httptest.NewRequest("GET", "/clients", nil)
+	response := httptest.NewRecorder()
+	ClientsHandler().ServeHTTP(response, request)
+	if response.Code != 200 {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if got := response.Header().Get("Content-Security-Policy"); got == "" {
+		t.Fatal("clients page has no content security policy")
+	}
+	for _, marker := range []string{"Installed clients", "/api/v1/admin/clients", "event_limit", "ParaBeaconAuth.authHeaders"} {
+		if !strings.Contains(response.Body.String(), marker) {
+			t.Errorf("clients page does not contain %q", marker)
+		}
+	}
+}
+
 func TestReleaseHandlerServesReleaseConsoleWithSecurityPolicy(t *testing.T) {
 	request := httptest.NewRequest("GET", "/release", nil)
 	response := httptest.NewRecorder()
