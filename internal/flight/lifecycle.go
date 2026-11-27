@@ -25,7 +25,10 @@ const (
 	maxFlightPoints = 300_000
 )
 
-var ErrInvalidPoint = errors.New("invalid flight telemetry point")
+var (
+	ErrInvalidPoint = errors.New("invalid flight telemetry point")
+	ErrStaleReset   = errors.New("flight reset timestamp is stale")
+)
 
 type TrackPoint struct {
 	Latitude          float64
@@ -130,6 +133,32 @@ func (e *LifecycleEngine) FlightStartedAt(userID uuid.UUID) (State, time.Time) {
 		return current.state, current.takeoffSince
 	}
 	return current.state, current.startedAt
+}
+
+func (e *LifecycleEngine) Reset(userID uuid.UUID, resetAt time.Time) error {
+	if err := e.parent.Err(); err != nil {
+		return err
+	}
+	if userID == uuid.Nil || resetAt.IsZero() {
+		return ErrInvalidPoint
+	}
+	e.submitMu.RLock()
+	closed := e.closed
+	e.submitMu.RUnlock()
+	if closed {
+		return context.Canceled
+	}
+	resetAt = resetAt.UTC()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if current := e.users[userID]; current != nil && !current.lastPoint.Timestamp.IsZero() && !resetAt.After(current.lastPoint.Timestamp) {
+		return ErrStaleReset
+	}
+	e.users[userID] = &userFlight{
+		state:     Idle,
+		lastPoint: TrackPoint{Timestamp: resetAt},
+	}
+	return nil
 }
 
 func (e *LifecycleEngine) Observe(userID uuid.UUID, point TrackPoint) error {

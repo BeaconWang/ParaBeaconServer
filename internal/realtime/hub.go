@@ -43,10 +43,15 @@ type Location struct {
 }
 
 type incomingMessage struct {
-	Type     string   `json:"type"`
-	Location Location `json:"location"`
+	Type      string    `json:"type"`
+	Location  Location  `json:"location"`
+	Timestamp time.Time `json:"timestamp"`
 }
 
+type flightResetAck struct {
+	Type    string    `json:"type"`
+	ResetAt time.Time `json:"reset_at"`
+}
 type Snapshot struct {
 	Type   string     `json:"type"`
 	RoomID uuid.UUID  `json:"room_id"`
@@ -293,6 +298,33 @@ func (h *Hub) broadcast(now time.Time) {
 	}
 }
 
+func (h *Hub) resetFlight(c *client, resetAt time.Time) error {
+	if !c.canPublish {
+		return errors.New("room subscription is read-only")
+	}
+	if h.lifecycle == nil {
+		return errors.New("flight lifecycle is unavailable")
+	}
+	resetAt = resetAt.UTC()
+	now := time.Now().UTC()
+	if resetAt.IsZero() || now.Sub(resetAt) > 2*time.Minute || resetAt.After(now.Add(5*time.Second)) {
+		return errors.New("flight reset timestamp outside accepted range")
+	}
+	if err := h.lifecycle.Reset(c.userID, resetAt); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(flightResetAck{Type: "flight_reset_ack", ResetAt: resetAt})
+	if err != nil {
+		return err
+	}
+	select {
+	case c.send <- payload:
+	case <-c.done:
+	default:
+		h.logger.Printf("realtime flight reset ack dropped room=%s user=%s", c.roomID, c.userID)
+	}
+	return nil
+}
 func (h *Hub) update(c *client, location Location) error {
 	if !c.canPublish {
 		return errors.New("room subscription is read-only")
@@ -412,17 +444,22 @@ func (c *client) readPump() {
 			}
 			return
 		}
-		now := time.Now()
-		if !c.lastRead.IsZero() && now.Sub(c.lastRead) < 100*time.Millisecond {
-			continue
-		}
-		c.lastRead = now
-		if message.Type != "location" {
+		switch message.Type {
+		case "location":
+			now := time.Now()
+			if !c.lastRead.IsZero() && now.Sub(c.lastRead) < 100*time.Millisecond {
+				continue
+			}
+			c.lastRead = now
+			if err := c.hub.update(c, message.Location); err != nil {
+				c.hub.logger.Printf("realtime rejected location room=%s user=%s: %v", c.roomID, c.userID, err)
+			}
+		case "flight_reset":
+			if err := c.hub.resetFlight(c, message.Timestamp); err != nil {
+				c.hub.logger.Printf("realtime rejected flight reset room=%s user=%s: %v", c.roomID, c.userID, err)
+			}
+		default:
 			c.hub.logger.Printf("realtime invalid message type room=%s user=%s", c.roomID, c.userID)
-			continue
-		}
-		if err := c.hub.update(c, message.Location); err != nil {
-			c.hub.logger.Printf("realtime rejected location room=%s user=%s: %v", c.roomID, c.userID, err)
 		}
 	}
 }

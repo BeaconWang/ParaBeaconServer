@@ -71,6 +71,44 @@ func TestLifecycleDetectsTakeoffLandingAndGeneratesIGC(t *testing.T) {
 	}
 }
 
+func TestLifecycleResetClearsFlightAndRejectsPreResetTelemetry(t *testing.T) {
+	engine := NewLifecycleEngine(context.Background(), nil, nil)
+	defer engine.Close()
+	userID := uuid.New()
+	base := time.Now().UTC().Truncate(time.Second)
+	for second := 0; second <= 3; second++ {
+		if err := engine.Observe(userID, TrackPoint{
+			Latitude: 37.5, Longitude: -122.5, AltitudeMeters: 100 + float64(second),
+			GroundSpeedMPS: 8, Timestamp: base.Add(time.Duration(second) * time.Second),
+		}); err != nil {
+			t.Fatalf("Observe() error = %v", err)
+		}
+	}
+	if got := engine.State(userID); got != InFlight {
+		t.Fatalf("state before reset = %s, want %s", got, InFlight)
+	}
+
+	resetAt := base.Add(5 * time.Second)
+	if err := engine.Reset(userID, resetAt); err != nil {
+		t.Fatalf("Reset() error = %v", err)
+	}
+	if got := engine.State(userID); got != Idle {
+		t.Fatalf("state after reset = %s, want %s", got, Idle)
+	}
+	if err := engine.Observe(userID, TrackPoint{
+		Latitude: 37.5, Longitude: -122.5, AltitudeMeters: 105,
+		GroundSpeedMPS: 8, Timestamp: base.Add(4 * time.Second),
+	}); err != nil {
+		t.Fatalf("stale Observe() error = %v", err)
+	}
+	if got := engine.State(userID); got != Idle {
+		t.Fatalf("state after stale telemetry = %s, want %s", got, Idle)
+	}
+	if err := engine.Reset(userID, resetAt); err != ErrStaleReset {
+		t.Fatalf("replayed Reset() error = %v, want %v", err, ErrStaleReset)
+	}
+}
+
 func TestGenerateIGCEncodesBothLongitudeHemisphereSigns(t *testing.T) {
 	userID := uuid.New()
 	base := time.Date(2026, 6, 4, 12, 34, 56, 0, time.UTC)
