@@ -2,11 +2,20 @@ package realtime
 
 import (
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/parabeacon/server/internal/flight"
 	"github.com/parabeacon/server/internal/model"
 )
+
+func (h *Hub) PilotFlightState(userID uuid.UUID) (bool, time.Time) {
+	if h.lifecycle == nil || userID == uuid.Nil {
+		return false, time.Time{}
+	}
+	state, startedAt := h.lifecycle.FlightStartedAt(userID)
+	return state == flight.InFlight || state == flight.Landing, startedAt
+}
 
 func (h *Hub) ObserveTrackingPoints(userID uuid.UUID, points []model.LiveTrackPoint) {
 	if h.lifecycle == nil || userID == uuid.Nil || len(points) == 0 {

@@ -20,6 +20,12 @@ type LiveTrackSession struct {
 
 type PublicPilotLocation struct {
 	SessionID       uuid.UUID               `gorm:"column:session_id" json:"-"`
+	UserID          uuid.UUID               `gorm:"column:user_id" json:"-"`
+	StartedAt       time.Time               `gorm:"column:started_at" json:"-"`
+	EndedAt         *time.Time              `gorm:"column:ended_at" json:"-"`
+	FlightStartedAt time.Time               `gorm:"-" json:"-"`
+	IsOnline        bool                    `gorm:"column:is_online" json:"is_online"`
+	IsFlying        bool                    `gorm:"-" json:"is_flying"`
 	LiveRoomID      *uuid.UUID              `gorm:"-" json:"live_room_id,omitempty"`
 	PilotNumber     int                     `gorm:"column:pilot_number" json:"pilot_number"`
 	ChannelNumber   int                     `gorm:"column:channel_number" json:"channel_number"`

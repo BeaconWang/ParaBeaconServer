@@ -31,16 +31,25 @@ type TrackingRepository interface {
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
-	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
+	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time, includeOffline bool) ([]model.PublicPilotLocation, error)
 	ListPublicTrackPoints(ctx context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error)
 }
 
-type TrackingService struct {
-	tracking TrackingRepository
+type PilotFlightStateProvider interface {
+	PilotFlightState(userID uuid.UUID) (flying bool, startedAt time.Time)
 }
 
-func NewTrackingService(tracking TrackingRepository) *TrackingService {
-	return &TrackingService{tracking: tracking}
+type TrackingService struct {
+	tracking     TrackingRepository
+	flightStates PilotFlightStateProvider
+}
+
+func NewTrackingService(tracking TrackingRepository, flightStates ...PilotFlightStateProvider) *TrackingService {
+	service := &TrackingService{tracking: tracking}
+	if len(flightStates) > 0 {
+		service.flightStates = flightStates[0]
+	}
+	return service
 }
 
 func (s *TrackingService) StartSession(ctx context.Context, userID uuid.UUID, pilotName string, startedAt time.Time, publiclyShare bool) (*model.LiveTrackSession, error) {
@@ -91,7 +100,7 @@ func (s *TrackingService) SetPublicSharing(ctx context.Context, userID, sessionI
 	return s.tracking.SetPublicSharing(ctx, userID, sessionID, enabled)
 }
 
-func (s *TrackingService) ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error) {
+func (s *TrackingService) ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, includeOffline bool) ([]model.PublicPilotLocation, error) {
 	if !finiteInRange(south, -90, 90) ||
 		!finiteInRange(north, -90, 90) ||
 		!finiteInRange(west, -180, 180) ||
@@ -113,6 +122,7 @@ func (s *TrackingService) ListPublicLocations(ctx context.Context, userID, taskO
 		PublicLocationPageSize,
 		now.Add(-PublicLocationMaxAge),
 		observedUntil,
+		includeOffline,
 	)
 	if err != nil || len(locations) == 0 {
 		return locations, err
@@ -120,17 +130,34 @@ func (s *TrackingService) ListPublicLocations(ctx context.Context, userID, taskO
 
 	sessionIDs := make([]uuid.UUID, 0, len(locations))
 	locationIndexes := make(map[uuid.UUID]int, len(locations))
+	var earliestFlightStart time.Time
 	for index := range locations {
-		locations[index].Path = []model.PublicPilotTrackPoint{}
-		roomID := locations[index].SessionID
-		locations[index].LiveRoomID = &roomID
+		location := &locations[index]
+		location.Path = []model.PublicPilotTrackPoint{}
+		roomID := location.SessionID
+		location.LiveRoomID = &roomID
+		if s.flightStates != nil {
+			location.IsFlying, location.FlightStartedAt = s.flightStates.PilotFlightState(location.UserID)
+		}
+		if !location.IsFlying {
+			continue
+		}
+		if location.FlightStartedAt.IsZero() {
+			location.FlightStartedAt = location.StartedAt
+		}
+		if earliestFlightStart.IsZero() || location.FlightStartedAt.Before(earliestFlightStart) {
+			earliestFlightStart = location.FlightStartedAt
+		}
 		sessionIDs = append(sessionIDs, roomID)
-		locationIndexes[locations[index].SessionID] = index
+		locationIndexes[location.SessionID] = index
+	}
+	if len(sessionIDs) == 0 {
+		return locations, nil
 	}
 	trackPoints, err := s.tracking.ListPublicTrackPoints(
 		ctx,
 		sessionIDs,
-		now.Add(-PublicTrackMaxAge),
+		earliestFlightStart,
 		observedUntil,
 		PublicTrackMaxPoints,
 	)
@@ -138,7 +165,7 @@ func (s *TrackingService) ListPublicLocations(ctx context.Context, userID, taskO
 		return nil, err
 	}
 	for _, point := range trackPoints {
-		if index, ok := locationIndexes[point.SessionID]; ok {
+		if index, ok := locationIndexes[point.SessionID]; ok && !point.Timestamp.Before(locations[index].FlightStartedAt) {
 			locations[index].Path = append(locations[index].Path, point)
 		}
 	}

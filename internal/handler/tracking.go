@@ -20,7 +20,7 @@ type TrackingService interface {
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
-	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error)
+	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, includeOffline bool) ([]model.PublicPilotLocation, error)
 }
 
 type TrackingPointObserver interface {
@@ -127,7 +127,16 @@ func (h *TrackingHandler) ListPublicLocations(c *gin.Context) {
 		}
 		after = parsed
 	}
-	locations, err := h.tracking.ListPublicLocations(c.Request.Context(), userID, taskOwnerID, south, north, west, east, after)
+	includeOffline := false
+	if raw := c.Query("show_offline"); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			respondError(c, http.StatusBadRequest, "invalid offline-location setting")
+			return
+		}
+		includeOffline = parsed
+	}
+	locations, err := h.tracking.ListPublicLocations(c.Request.Context(), userID, taskOwnerID, south, north, west, east, after, includeOffline)
 	if err != nil {
 		respondTrackingError(c, err)
 		return

@@ -22,7 +22,7 @@ type TrackingRepository interface {
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
-	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error)
+	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time, includeOffline bool) ([]model.PublicPilotLocation, error)
 	ListPublicTrackPoints(ctx context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error)
 }
 
@@ -112,16 +112,20 @@ func (r *GormTrackingRepository) SetPublicSharing(ctx context.Context, userID, s
 	return nil
 }
 
-func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error) {
+func (r *GormTrackingRepository) ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time, includeOffline bool) ([]model.PublicPilotLocation, error) {
 	locations := make([]model.PublicPilotLocation, 0, limit)
 	query := r.db.WithContext(ctx).
 		Table("live_track_sessions AS s").
-		Select("s.id AS session_id, s.pilot_name, COALESCE(NULLIF(BTRIM(u.display_name), ''), u.username) AS public_pilot_name, u.pilot_number, u.channel_number, u.avatar_id, CASE WHEN u.profile_image_key <> '' THEN '/api/v1/profile-images/' || u.profile_image_key ELSE '' END AS profile_image_url, latest.latitude, latest.longitude, latest.altitude, latest.ground_speed, latest.vertical_speed, latest.heading, latest.timestamp AS observed_at").
+		Select("s.id AS session_id, s.user_id AS user_id, s.started_at, s.ended_at, CASE WHEN s.ended_at IS NULL AND latest.timestamp >= ? AND latest.timestamp <= ? THEN TRUE ELSE FALSE END AS is_online, s.pilot_name, COALESCE(NULLIF(BTRIM(u.display_name), ''), u.username) AS public_pilot_name, u.pilot_number, u.channel_number, u.avatar_id, CASE WHEN u.profile_image_key <> '' THEN '/api/v1/profile-images/' || u.profile_image_key ELSE '' END AS profile_image_url, latest.latitude, latest.longitude, latest.altitude, latest.ground_speed, latest.vertical_speed, latest.heading, latest.timestamp AS observed_at", observedSince, observedUntil).
 		Joins("JOIN users AS u ON u.id = s.user_id").
 		Joins("JOIN LATERAL (SELECT p.latitude, p.longitude, p.altitude, p.ground_speed, p.vertical_speed, p.heading, p.timestamp FROM live_track_points p WHERE p.session_id = s.id ORDER BY p.timestamp DESC LIMIT 1) AS latest ON TRUE").
-		Where("s.ended_at IS NULL AND s.publicly_share = ?", true).
-		Where("latest.timestamp >= ? AND latest.timestamp <= ?", observedSince, observedUntil).
+		Where("s.publicly_share = ?", true).
+		Where("latest.timestamp <= ?", observedUntil).
+		Where("NOT EXISTS (SELECT 1 FROM live_track_sessions newer WHERE newer.user_id = s.user_id AND (newer.started_at > s.started_at OR (newer.started_at = s.started_at AND newer.id > s.id)))").
 		Where("latest.latitude BETWEEN ? AND ?", south, north)
+	if !includeOffline {
+		query = query.Where("s.ended_at IS NULL").Where("latest.timestamp >= ?", observedSince)
+	}
 	// Channel authorization is always applied for signed-in viewers; the pinned
 	// task predicate below is an additional AND filter, never a replacement.
 	if userID != uuid.Nil {
@@ -155,15 +159,15 @@ func (r *GormTrackingRepository) ListPublicTrackPoints(ctx context.Context, sess
 	}
 	rankedPoints := r.db.WithContext(ctx).
 		Table("live_track_points AS p").
-		Select("p.session_id, p.latitude, p.longitude, p.altitude, p.ground_speed, p.vertical_speed, p.heading, p.timestamp, ROW_NUMBER() OVER (PARTITION BY p.session_id ORDER BY p.timestamp DESC) AS point_rank").
+		Select("p.session_id, p.latitude, p.longitude, p.altitude, p.ground_speed, p.vertical_speed, p.heading, p.timestamp, ROW_NUMBER() OVER (PARTITION BY p.session_id ORDER BY p.timestamp ASC) AS point_rank, COUNT(*) OVER (PARTITION BY p.session_id) AS point_count").
 		Joins("JOIN live_track_sessions AS s ON s.id = p.session_id").
 		Where("p.session_id IN ?", sessionIDs).
-		Where("s.ended_at IS NULL AND s.publicly_share = ?", true).
+		Where("s.publicly_share = ?", true).
 		Where("p.timestamp >= ? AND p.timestamp <= ?", observedSince, observedUntil)
 	points := make([]model.PublicPilotTrackPoint, 0, len(sessionIDs)*limitPerSession)
 	err := r.db.WithContext(ctx).
 		Table("(?) AS ranked_points", rankedPoints).
-		Where("point_rank <= ?", limitPerSession).
+		Where("point_rank = 1 OR point_rank = point_count OR MOD(point_rank - 1, GREATEST(1, CEIL(point_count::numeric / ?)::bigint)) = 0", limitPerSession).
 		Order("session_id ASC, timestamp ASC").
 		Scan(&points).Error
 	if err != nil {

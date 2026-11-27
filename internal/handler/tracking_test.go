@@ -16,16 +16,17 @@ import (
 )
 
 type trackingHandlerTestService struct {
-	userID        uuid.UUID
-	sessionID     uuid.UUID
-	publiclyShare bool
-	south         float64
-	north         float64
-	west          float64
-	east          float64
-	after         uuid.UUID
-	taskOwnerID   uuid.UUID
-	locations     []model.PublicPilotLocation
+	userID         uuid.UUID
+	sessionID      uuid.UUID
+	publiclyShare  bool
+	south          float64
+	north          float64
+	west           float64
+	east           float64
+	after          uuid.UUID
+	taskOwnerID    uuid.UUID
+	includeOffline bool
+	locations      []model.PublicPilotLocation
 }
 
 func (s *trackingHandlerTestService) StartSession(_ context.Context, userID uuid.UUID, pilotName string, startedAt time.Time, publiclyShare bool) (*model.LiveTrackSession, error) {
@@ -53,10 +54,11 @@ func (s *trackingHandlerTestService) SetPublicSharing(_ context.Context, userID,
 	return nil
 }
 
-func (s *trackingHandlerTestService) ListPublicLocations(_ context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID) ([]model.PublicPilotLocation, error) {
+func (s *trackingHandlerTestService) ListPublicLocations(_ context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, includeOffline bool) ([]model.PublicPilotLocation, error) {
 	s.userID = userID
 	s.taskOwnerID = taskOwnerID
 	s.south, s.north, s.west, s.east, s.after = south, north, west, east, after
+	s.includeOffline = includeOffline
 	return s.locations, nil
 }
 
@@ -76,6 +78,8 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 			Altitude:        1200,
 			GroundSpeed:     12,
 			ObservedAt:      time.Now().UTC(),
+			IsOnline:        true,
+			IsFlying:        true,
 			Path: []model.PublicPilotTrackPoint{{
 				SessionID:   sessionID,
 				Latitude:    47.1,
@@ -93,7 +97,7 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 		NewTrackingHandler(service).ListPublicLocations(c)
 	})
 	taskOwnerID := uuid.New()
-	request := httptest.NewRequest(http.MethodGet, "/map/active-locations?west=8&south=47&east=9&north=48&task_owner_id="+taskOwnerID.String(), nil)
+	request := httptest.NewRequest(http.MethodGet, "/map/active-locations?west=8&south=47&east=9&north=48&task_owner_id="+taskOwnerID.String()+"&show_offline=true", nil)
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -107,6 +111,9 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	}
 	if service.south != 47 || service.north != 48 || service.west != 8 || service.east != 9 {
 		t.Fatalf("bounds = %v %v %v %v", service.south, service.north, service.west, service.east)
+	}
+	if !service.includeOffline {
+		t.Fatal("offline-location setting was not forwarded")
 	}
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
@@ -143,7 +150,7 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	if err := json.Unmarshal(locations[0]["profile_image_url"], &publicProfileImageURL); err != nil || !strings.Contains(publicProfileImageURL, "/api/v1/profile-images/") {
 		t.Fatalf("public profile image URL = %q, err=%v", publicProfileImageURL, err)
 	}
-	for _, sharedField := range []string{"pilot_name", "pilot_number", "channel_number", "avatar_id", "profile_image_url", "altitude", "speed", "path"} {
+	for _, sharedField := range []string{"pilot_name", "pilot_number", "channel_number", "avatar_id", "profile_image_url", "altitude", "speed", "path", "is_online", "is_flying"} {
 		if _, exists := locations[0][sharedField]; !exists {
 			t.Errorf("public location has no shared flight field %q", sharedField)
 		}
@@ -186,6 +193,7 @@ func TestListPublicLocationsRejectsInvalidBoundsAndCursor(t *testing.T) {
 	for _, target := range []string{
 		"/map/active-locations?west=0&south=20&east=1",
 		"/map/active-locations?west=0&south=0&east=1&north=1&cursor=not-a-uuid",
+		"/map/active-locations?west=0&south=0&east=1&north=1&show_offline=unknown",
 	} {
 		response := httptest.NewRecorder()
 		engine.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))

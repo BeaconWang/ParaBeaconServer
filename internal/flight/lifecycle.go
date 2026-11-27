@@ -119,6 +119,19 @@ func (e *LifecycleEngine) State(userID uuid.UUID) State {
 	return Idle
 }
 
+func (e *LifecycleEngine) FlightStartedAt(userID uuid.UUID) (State, time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	current := e.users[userID]
+	if current == nil {
+		return Idle, time.Time{}
+	}
+	if current.state == TakeOff {
+		return current.state, current.takeoffSince
+	}
+	return current.state, current.startedAt
+}
+
 func (e *LifecycleEngine) Observe(userID uuid.UUID, point TrackPoint) error {
 	if err := e.parent.Err(); err != nil {
 		return err

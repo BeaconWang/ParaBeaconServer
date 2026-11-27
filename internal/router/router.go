@@ -80,7 +80,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 	profileImageService := service.NewProfileImageService(repository.NewUserRepository(db), profileImageStorage)
 	profileImageHandler := handler.NewProfileImageHandler(profileImageService)
 	trackingRepo := repository.NewTrackingRepository(db)
-	trackingService := service.NewTrackingService(trackingRepo)
+	trackingService := service.NewTrackingService(trackingRepo, liveHub)
 	trackingHandler := handler.NewTrackingHandler(trackingService, liveHub)
 	chatRepository := repository.NewChatRepository(db)
 	chatService := service.NewChatService(chatRepository)

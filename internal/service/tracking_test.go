@@ -55,6 +55,15 @@ func TestValidateTrackingPoint(t *testing.T) {
 	}
 }
 
+type trackingFlightState struct {
+	flying    bool
+	startedAt time.Time
+}
+
+func (s trackingFlightState) PilotFlightState(uuid.UUID) (bool, time.Time) {
+	return s.flying, s.startedAt
+}
+
 type trackingTestRepository struct {
 	created              *model.LiveTrackSession
 	sharingUserID        uuid.UUID
@@ -67,6 +76,7 @@ type trackingTestRepository struct {
 	limit                int
 	observedSince        time.Time
 	observedUntil        time.Time
+	includeOffline       bool
 	locations            []model.PublicPilotLocation
 	listCalled           bool
 	trackPointSessionIDs []uuid.UUID
@@ -101,7 +111,7 @@ func (r *trackingTestRepository) SetPublicSharing(_ context.Context, userID, ses
 	return nil
 }
 
-func (r *trackingTestRepository) ListPublicLocations(_ context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time) ([]model.PublicPilotLocation, error) {
+func (r *trackingTestRepository) ListPublicLocations(_ context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time, includeOffline bool) ([]model.PublicPilotLocation, error) {
 	r.queryUserID = userID
 	r.taskOwnerID = taskOwnerID
 	r.listCalled = true
@@ -110,6 +120,7 @@ func (r *trackingTestRepository) ListPublicLocations(_ context.Context, userID, 
 	r.limit = limit
 	r.observedSince = observedSince
 	r.observedUntil = observedUntil
+	r.includeOffline = includeOffline
 	return r.locations, nil
 }
 
@@ -147,7 +158,7 @@ func TestListPublicLocationsCombinesViewerChannelAndPinnedTaskFilters(t *testing
 	requesterID := uuid.New()
 	taskOwnerID := uuid.New()
 
-	locations, err := tracking.ListPublicLocations(context.Background(), requesterID, taskOwnerID, -10, 10, 170, -170, after)
+	locations, err := tracking.ListPublicLocations(context.Background(), requesterID, taskOwnerID, -10, 10, 170, -170, after, false)
 	if err != nil {
 		t.Fatalf("ListPublicLocations() error = %v", err)
 	}
@@ -169,22 +180,24 @@ func TestListPublicLocationsCombinesViewerChannelAndPinnedTaskFilters(t *testing
 	}
 }
 
-func TestListPublicLocationsAttachesOnlyBoundedPublicTrailData(t *testing.T) {
+func TestListPublicLocationsAttachesFlightTrailForOfflinePilot(t *testing.T) {
 	sessionID := uuid.New()
+	userID := uuid.New()
+	flightStartedAt := time.Now().UTC().Add(-time.Minute)
 	repository := &trackingTestRepository{
-		locations: []model.PublicPilotLocation{{SessionID: sessionID, PilotNumber: 123456, PilotName: "pilot_one"}},
+		locations: []model.PublicPilotLocation{{SessionID: sessionID, UserID: userID, StartedAt: flightStartedAt.Add(-time.Minute), PilotNumber: 123456, PilotName: "pilot_one", IsOnline: false}},
 		trackPoints: []model.PublicPilotTrackPoint{{
 			SessionID:   sessionID,
 			Latitude:    47.1,
 			Longitude:   8.5,
 			Altitude:    1200,
 			GroundSpeed: 12,
-			Timestamp:   time.Now().UTC(),
+			Timestamp:   flightStartedAt.Add(time.Second),
 		}},
 	}
-	tracking := NewTrackingService(repository)
+	tracking := NewTrackingService(repository, trackingFlightState{flying: true, startedAt: flightStartedAt})
 
-	locations, err := tracking.ListPublicLocations(context.Background(), uuid.New(), uuid.Nil, -10, 10, 170, -170, uuid.Nil)
+	locations, err := tracking.ListPublicLocations(context.Background(), uuid.New(), uuid.Nil, -10, 10, 170, -170, uuid.Nil, true)
 	if err != nil {
 		t.Fatalf("ListPublicLocations() error = %v", err)
 	}
@@ -194,20 +207,18 @@ func TestListPublicLocationsAttachesOnlyBoundedPublicTrailData(t *testing.T) {
 	if repository.trackPointLimit != PublicTrackMaxPoints {
 		t.Fatalf("track point limit = %d, want %d", repository.trackPointLimit, PublicTrackMaxPoints)
 	}
-	if len(locations) != 1 || len(locations[0].Path) != 1 || locations[0].Path[0].SessionID != sessionID {
-		t.Fatalf("public pilot path = %#v", locations)
+	if !repository.includeOffline || len(locations) != 1 || !locations[0].IsFlying || locations[0].IsOnline || len(locations[0].Path) != 1 || locations[0].Path[0].SessionID != sessionID {
+		t.Fatalf("offline pilot flight path = %#v", locations)
 	}
-	now := time.Now().UTC()
-	if repository.trackPointSince.Before(now.Add(-PublicTrackMaxAge-time.Second)) ||
-		repository.trackPointSince.After(now.Add(-PublicTrackMaxAge+time.Second)) {
-		t.Fatalf("track point history starts at %s", repository.trackPointSince)
+	if !repository.trackPointSince.Equal(flightStartedAt) {
+		t.Fatalf("track point history starts at %s, want %s", repository.trackPointSince, flightStartedAt)
 	}
 }
 
 func TestListPublicLocationsRejectsInvalidBounds(t *testing.T) {
 	repository := &trackingTestRepository{}
 	tracking := NewTrackingService(repository)
-	if _, err := tracking.ListPublicLocations(context.Background(), uuid.New(), uuid.Nil, 20, 10, 0, 1, uuid.Nil); err != ErrInvalidTrackingData {
+	if _, err := tracking.ListPublicLocations(context.Background(), uuid.New(), uuid.Nil, 20, 10, 0, 1, uuid.Nil, false); err != ErrInvalidTrackingData {
 		t.Fatalf("invalid bounds error = %v, want ErrInvalidTrackingData", err)
 	}
 	if repository.listCalled {
