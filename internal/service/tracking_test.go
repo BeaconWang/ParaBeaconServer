@@ -69,6 +69,8 @@ type trackingTestRepository struct {
 	sharingUserID        uuid.UUID
 	sharingID            uuid.UUID
 	sharing              bool
+	deletedUserID        uuid.UUID
+	deletedSessionIDs    []uuid.UUID
 	queryUserID          uuid.UUID
 	taskOwnerID          uuid.UUID
 	bounds               [4]float64
@@ -109,6 +111,12 @@ func (r *trackingTestRepository) SetPublicSharing(_ context.Context, userID, ses
 	r.sharingID = sessionID
 	r.sharing = enabled
 	return nil
+}
+
+func (r *trackingTestRepository) DeleteLocationData(_ context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	r.deletedUserID = userID
+	r.deletedSessionIDs = []uuid.UUID{uuid.New()}
+	return r.deletedSessionIDs, nil
 }
 
 func (r *trackingTestRepository) ListPublicLocations(_ context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time, includeOffline bool) ([]model.PublicPilotLocation, error) {
@@ -223,6 +231,23 @@ func TestListPublicLocationsRejectsInvalidBounds(t *testing.T) {
 	}
 	if repository.listCalled {
 		t.Fatal("repository called with invalid bounds")
+	}
+}
+
+func TestDeleteLocationDataRequiresUserAndPassesOwnership(t *testing.T) {
+	repository := &trackingTestRepository{}
+	tracking := NewTrackingService(repository)
+	userID := uuid.New()
+
+	sessionIDs, err := tracking.DeleteLocationData(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("DeleteLocationData() error = %v", err)
+	}
+	if repository.deletedUserID != userID || len(sessionIDs) != 1 || sessionIDs[0] != repository.deletedSessionIDs[0] {
+		t.Fatalf("deleted user/session IDs = %s / %v", repository.deletedUserID, sessionIDs)
+	}
+	if _, err := tracking.DeleteLocationData(context.Background(), uuid.Nil); err != ErrInvalidTrackingData {
+		t.Fatalf("DeleteLocationData(nil user) error = %v, want %v", err, ErrInvalidTrackingData)
 	}
 }
 

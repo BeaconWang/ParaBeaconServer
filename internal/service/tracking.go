@@ -31,6 +31,7 @@ type TrackingRepository interface {
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
+	DeleteLocationData(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time, includeOffline bool) ([]model.PublicPilotLocation, error)
 	ListPublicTrackPoints(ctx context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error)
 }
@@ -98,6 +99,13 @@ func (s *TrackingService) SetPublicSharing(ctx context.Context, userID, sessionI
 		return ErrInvalidTrackingData
 	}
 	return s.tracking.SetPublicSharing(ctx, userID, sessionID, enabled)
+}
+
+func (s *TrackingService) DeleteLocationData(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	if userID == uuid.Nil {
+		return nil, ErrInvalidTrackingData
+	}
+	return s.tracking.DeleteLocationData(ctx, userID)
 }
 
 func (s *TrackingService) ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, includeOffline bool) ([]model.PublicPilotLocation, error) {

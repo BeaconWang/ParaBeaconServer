@@ -22,6 +22,7 @@ type TrackingRepository interface {
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
+	DeleteLocationData(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, limit int, observedSince, observedUntil time.Time, includeOffline bool) ([]model.PublicPilotLocation, error)
 	ListPublicTrackPoints(ctx context.Context, sessionIDs []uuid.UUID, observedSince, observedUntil time.Time, limitPerSession int) ([]model.PublicPilotTrackPoint, error)
 }
@@ -54,6 +55,10 @@ func (r *GormTrackingRepository) CreateSession(ctx context.Context, session *mod
 func (r *GormTrackingRepository) StorePoints(ctx context.Context, userID, sessionID uuid.UUID, points []model.LiveTrackPoint) (int64, error) {
 	var accepted int64
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", userID).Take(&user).Error; err != nil {
+			return err
+		}
 		var session model.LiveTrackSession
 		if err := tx.Where("id = ? AND user_id = ? AND ended_at IS NULL", sessionID, userID).First(&session).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -96,6 +101,27 @@ func (r *GormTrackingRepository) StopSession(ctx context.Context, userID, sessio
 		}
 		return tx.Model(&session).Update("ended_at", endedAt).Error
 	})
+}
+
+func (r *GormTrackingRepository) DeleteLocationData(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	sessionIDs := make([]uuid.UUID, 0)
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", userID).Take(&user).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.LiveTrackSession{}).Where("user_id = ?", userID).Pluck("id", &sessionIDs).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("user_id = ?", userID).Delete(&model.LiveTrackPoint{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("user_id = ?", userID).Delete(&model.LiveTrackSession{}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sessionIDs, nil
 }
 
 func (r *GormTrackingRepository) SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error {

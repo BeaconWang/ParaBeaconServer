@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/parabeacon/server/internal/flight"
+	"github.com/parabeacon/server/internal/model"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -78,23 +79,33 @@ type client struct {
 }
 
 type Hub struct {
-	mu        sync.Mutex
-	rooms     map[uuid.UUID]*room
-	redis     *redis.Client
-	lifecycle *flight.LifecycleEngine
-	logger    *log.Logger
-	ctx       context.Context
-	cancel    context.CancelFunc
-	started   bool
-	workers   sync.WaitGroup
+	mu            sync.Mutex
+	rooms         map[uuid.UUID]*room
+	disabledUsers map[uuid.UUID]bool
+	redis         *redis.Client
+	lifecycle     *flight.LifecycleEngine
+	pointStore    TrackingPointStore
+	logger        *log.Logger
+	ctx           context.Context
+	cancel        context.CancelFunc
+	started       bool
+	workers       sync.WaitGroup
 }
 
-func NewHub(redisClient *redis.Client, lifecycle *flight.LifecycleEngine, logger *log.Logger) *Hub {
+type TrackingPointStore interface {
+	StorePoints(context.Context, uuid.UUID, uuid.UUID, []model.LiveTrackPoint) (int64, error)
+}
+
+func NewHub(redisClient *redis.Client, lifecycle *flight.LifecycleEngine, logger *log.Logger, pointStores ...TrackingPointStore) *Hub {
 	if logger == nil {
 		logger = log.Default()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Hub{rooms: make(map[uuid.UUID]*room), redis: redisClient, lifecycle: lifecycle, logger: logger, ctx: ctx, cancel: cancel}
+	hub := &Hub{rooms: make(map[uuid.UUID]*room), disabledUsers: make(map[uuid.UUID]bool), redis: redisClient, lifecycle: lifecycle, logger: logger, ctx: ctx, cancel: cancel}
+	if len(pointStores) > 0 {
+		hub.pointStore = pointStores[0]
+	}
+	return hub
 }
 
 func (h *Hub) Serve(userID, roomID uuid.UUID, pilotName string, canPublish bool, conn *websocket.Conn) {
@@ -124,7 +135,7 @@ func (h *Hub) Serve(userID, roomID uuid.UUID, pilotName string, canPublish bool,
 func (h *Hub) register(c *client) bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.ctx.Err() != nil {
+	if h.ctx.Err() != nil || h.disabledUsers[c.userID] {
 		return false
 	}
 	r := h.rooms[c.roomID]
@@ -339,7 +350,38 @@ func (h *Hub) update(c *client, location Location) error {
 		return errors.New("location timestamp outside accepted range")
 	}
 	h.mu.Lock()
+	if h.disabledUsers[c.userID] {
+		h.mu.Unlock()
+		return errors.New("live tracking is disabled")
+	}
 	r := h.rooms[c.roomID]
+	if r == nil {
+		h.mu.Unlock()
+		return errors.New("room is no longer active")
+	}
+	if previous, exists := r.locations[c.userID]; exists && !location.Timestamp.After(previous.Timestamp) {
+		h.mu.Unlock()
+		return nil
+	}
+	h.mu.Unlock()
+	if h.pointStore != nil {
+		point := model.LiveTrackPoint{
+			SessionID: c.roomID, UserID: c.userID, Latitude: location.Latitude,
+			Longitude: location.Longitude, Altitude: location.Altitude, GroundSpeed: location.Speed,
+			GPSAltitude: location.GPSAlt, BarometricAltitude: location.PressureAlt,
+			Heading: location.Heading, Timestamp: location.Timestamp,
+		}
+		if _, err := h.pointStore.StorePoints(h.ctx, c.userID, c.roomID, []model.LiveTrackPoint{point}); err != nil {
+			h.logger.Printf("persist realtime location room=%s user=%s: %v", c.roomID, c.userID, err)
+			return err
+		}
+	}
+	h.mu.Lock()
+	if h.disabledUsers[c.userID] {
+		h.mu.Unlock()
+		return errors.New("live tracking is disabled")
+	}
+	r = h.rooms[c.roomID]
 	if r == nil {
 		h.mu.Unlock()
 		return errors.New("room is no longer active")
@@ -350,7 +392,6 @@ func (h *Hub) update(c *client, location Location) error {
 	}
 	r.locations[c.userID] = location
 	h.mu.Unlock()
-
 	if h.redis != nil {
 		data, err := json.Marshal(location)
 		if err != nil {
@@ -375,6 +416,12 @@ func (h *Hub) update(c *client, location Location) error {
 		}
 	}
 	if h.lifecycle != nil {
+		h.mu.Lock()
+		if h.disabledUsers[c.userID] {
+			h.mu.Unlock()
+			h.deleteRedisRoomData(c.roomID)
+			return errors.New("live tracking is disabled")
+		}
 		if err := h.lifecycle.Observe(c.userID, flight.TrackPoint{
 			Latitude: location.Latitude, Longitude: location.Longitude, AltitudeMeters: location.Altitude,
 			GPSAltitudeMeters: location.GPSAlt, PressureAltitude: location.PressureAlt,
@@ -382,6 +429,7 @@ func (h *Hub) update(c *client, location Location) error {
 		}); err != nil {
 			h.logger.Printf("flight state update user=%s: %v", c.userID, err)
 		}
+		h.mu.Unlock()
 	}
 	return nil
 }

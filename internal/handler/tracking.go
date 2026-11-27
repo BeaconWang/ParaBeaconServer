@@ -20,6 +20,7 @@ type TrackingService interface {
 	StopSession(ctx context.Context, userID, sessionID uuid.UUID, endedAt time.Time) error
 	ListActiveSessions(ctx context.Context, userID uuid.UUID) ([]model.LiveTrackSession, error)
 	SetPublicSharing(ctx context.Context, userID, sessionID uuid.UUID, enabled bool) error
+	DeleteLocationData(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	ListPublicLocations(ctx context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, includeOffline bool) ([]model.PublicPilotLocation, error)
 }
 
@@ -30,6 +31,8 @@ type TrackingPointObserver interface {
 type TrackingSessionObserver interface {
 	PublicSharingChanged(ownerID, sessionID uuid.UUID, enabled bool)
 	LiveSessionEnded(ownerID, sessionID uuid.UUID)
+	LiveSessionStarted(ownerID, sessionID uuid.UUID)
+	LiveTrackingDataDeleted(ownerID uuid.UUID, sessionIDs []uuid.UUID)
 }
 
 type TrackingHandler struct {
@@ -190,6 +193,9 @@ func (h *TrackingHandler) Start(c *gin.Context) {
 		respondTrackingError(c, err)
 		return
 	}
+	if h.sessionObserver != nil {
+		h.sessionObserver.LiveSessionStarted(userID, session.ID)
+	}
 	c.JSON(http.StatusCreated, gin.H{"session_id": session.ID.String(), "started_at": session.StartedAt, "pilot_name": session.PilotName})
 }
 
@@ -238,6 +244,23 @@ func (h *TrackingHandler) AddPoints(c *gin.Context) {
 		h.observer.ObserveTrackingPoints(userID, points)
 	}
 	c.JSON(http.StatusOK, gin.H{"accepted": accepted})
+}
+
+func (h *TrackingHandler) DeleteLocationData(c *gin.Context) {
+	userID, ok := trackingUserID(c)
+	if !ok {
+		respondError(c, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	sessionIDs, err := h.tracking.DeleteLocationData(c.Request.Context(), userID)
+	if err != nil {
+		respondTrackingError(c, err)
+		return
+	}
+	if h.sessionObserver != nil {
+		h.sessionObserver.LiveTrackingDataDeleted(userID, sessionIDs)
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *TrackingHandler) Stop(c *gin.Context) {

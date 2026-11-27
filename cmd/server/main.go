@@ -73,7 +73,7 @@ func run() error {
 	flightSettlement := service.NewAutomaticFlightSettlement(repository.NewFlightLogRepository(db), igcStore)
 	flightLifecycle := flight.NewLifecycleEngine(ctx, flightSettlement, logger)
 	defer flightLifecycle.Close()
-	liveHub := realtime.NewHub(redisClient, flightLifecycle, logger)
+	liveHub := realtime.NewHub(redisClient, flightLifecycle, logger, repository.NewTrackingRepository(db))
 	liveHub.Start()
 	defer liveHub.Close()
 	chatRepository := repository.NewChatRepository(db)

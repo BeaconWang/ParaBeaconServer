@@ -25,6 +25,11 @@ func (h *Hub) ObserveTrackingPoints(userID uuid.UUID, points []model.LiveTrackPo
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return ordered[i].Timestamp.Before(ordered[j].Timestamp)
 	})
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.disabledUsers[userID] {
+		return
+	}
 	for _, point := range ordered {
 		if err := h.lifecycle.Observe(userID, flight.TrackPoint{
 			Latitude: point.Latitude, Longitude: point.Longitude, AltitudeMeters: point.Altitude,

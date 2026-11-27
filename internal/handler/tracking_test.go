@@ -26,6 +26,7 @@ type trackingHandlerTestService struct {
 	after          uuid.UUID
 	taskOwnerID    uuid.UUID
 	includeOffline bool
+	deletedUserID  uuid.UUID
 	locations      []model.PublicPilotLocation
 }
 
@@ -52,6 +53,11 @@ func (s *trackingHandlerTestService) SetPublicSharing(_ context.Context, userID,
 	s.sessionID = sessionID
 	s.publiclyShare = enabled
 	return nil
+}
+
+func (s *trackingHandlerTestService) DeleteLocationData(_ context.Context, userID uuid.UUID) ([]uuid.UUID, error) {
+	s.deletedUserID = userID
+	return nil, nil
 }
 
 func (s *trackingHandlerTestService) ListPublicLocations(_ context.Context, userID, taskOwnerID uuid.UUID, south, north, west, east float64, after uuid.UUID, includeOffline bool) ([]model.PublicPilotLocation, error) {
@@ -164,6 +170,30 @@ func TestListPublicLocationsRequiresBoundsAndReturnsSharedFlightData(t *testing.
 	}
 	if _, exists := path[0]["session_id"]; exists {
 		t.Fatal("public path unexpectedly contains a session id")
+	}
+}
+
+func TestDeleteLocationDataRequiresAuthenticationAndUsesOwnerIdentity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &trackingHandlerTestService{}
+	userID := uuid.New()
+	engine := gin.New()
+	engine.DELETE("/tracking/location-data", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, userID)
+		NewTrackingHandler(service).DeleteLocationData(c)
+	})
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/tracking/location-data", nil))
+	if response.Code != http.StatusNoContent || service.deletedUserID != userID {
+		t.Fatalf("delete status=%d user=%s body=%s", response.Code, service.deletedUserID, response.Body.String())
+	}
+
+	unauthenticatedEngine := gin.New()
+	unauthenticatedEngine.DELETE("/tracking/location-data", NewTrackingHandler(service).DeleteLocationData)
+	unauthenticated := httptest.NewRecorder()
+	unauthenticatedEngine.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodDelete, "/tracking/location-data", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated delete status=%d, want %d", unauthenticated.Code, http.StatusUnauthorized)
 	}
 }
 

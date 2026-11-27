@@ -135,6 +135,15 @@ func (e *LifecycleEngine) FlightStartedAt(userID uuid.UUID) (State, time.Time) {
 	return current.state, current.startedAt
 }
 
+func (e *LifecycleEngine) Clear(userID uuid.UUID) {
+	if userID == uuid.Nil {
+		return
+	}
+	e.mu.Lock()
+	e.users[userID] = &userFlight{state: Idle}
+	e.mu.Unlock()
+}
+
 func (e *LifecycleEngine) Reset(userID uuid.UUID, resetAt time.Time) error {
 	if err := e.parent.Err(); err != nil {
 		return err

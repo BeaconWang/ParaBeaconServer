@@ -162,6 +162,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 		protected.DELETE("/user/profile-image", middleware.NewFixedWindowLimiter(10, time.Hour, 10000).Middleware(), profileImageHandler.Remove)
 		protected.POST("/user/change-password", middleware.NewFixedWindowLimiter(5, time.Minute, 10000).Middleware(), userHandler.ChangePassword)
 		protected.GET("/tracking", trackingHandler.ListActive)
+		protected.DELETE("/tracking/location-data", middleware.NewFixedWindowLimiter(10, time.Minute, 10000).Middleware(), trackingHandler.DeleteLocationData)
 		protected.GET("/tracking/live", middleware.NewFixedWindowLimiter(30, time.Minute, 10000).Middleware(), realtime.NewWebSocketHandler(
 			liveHub,
 			cfg.CORSAllowedOrigin,
