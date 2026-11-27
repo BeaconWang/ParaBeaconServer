@@ -166,6 +166,45 @@ func TestDownloadAppReleaseUsesAttachmentAndAPKContentType(t *testing.T) {
 	}
 }
 
+func TestDownloadAppReleaseSupportsResumableByteRanges(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	file := filepath.Join(t.TempDir(), "release.apk")
+	if err := os.WriteFile(file, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	service := &appReleaseHandlerTestService{
+		release: &model.AppRelease{VersionName: "1.2.3", VersionCode: 123},
+		path:    file,
+	}
+	engine := gin.New()
+	engine.GET("/api/v1/app/releases/:version_code/download", NewAppReleaseHandler(service).Download)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/app/releases/123/download", nil)
+	request.Header.Set("Range", "bytes=4-6")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusPartialContent || response.Body.String() != "456" {
+		t.Fatalf("range download status=%d body=%q", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Content-Range") != "bytes 4-6/10" {
+		t.Fatalf("Content-Range = %q", response.Header().Get("Content-Range"))
+	}
+	if service.downloadCount != 0 {
+		t.Fatalf("partial chunk inflated download count to %d", service.downloadCount)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/app/releases/123/download", nil)
+	request.Header.Set("Range", "bytes=0-3")
+	response = httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusPartialContent || response.Body.String() != "0123" {
+		t.Fatalf("initial range status=%d body=%q", response.Code, response.Body.String())
+	}
+	if service.downloadCount != 1 {
+		t.Fatalf("initial range download count = %d, want 1", service.downloadCount)
+	}
+}
+
 func TestPublishAppReleaseReadsVersionHeadersAndAPKBody(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	release := &model.AppRelease{VersionName: "1.2.3", VersionCode: 123}

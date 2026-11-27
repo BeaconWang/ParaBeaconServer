@@ -114,13 +114,16 @@ func (h *AppReleaseHandler) Download(c *gin.Context) {
 		respondInternalError(c)
 		return
 	}
-	if err := h.releases.RecordDownload(c.Request.Context(), versionCode); err != nil {
-		if service.IsAppReleaseNotFound(err) {
-			respondError(c, http.StatusNotFound, "app release not found")
+	rangeHeader := c.GetHeader("Range")
+	if rangeHeader == "" || strings.HasPrefix(rangeHeader, "bytes=0-") {
+		if err := h.releases.RecordDownload(c.Request.Context(), versionCode); err != nil {
+			if service.IsAppReleaseNotFound(err) {
+				respondError(c, http.StatusNotFound, "app release not found")
+				return
+			}
+			respondInternalError(c)
 			return
 		}
-		respondInternalError(c)
-		return
 	}
 	setNoStoreHeaders(c)
 	c.Header("Content-Type", "application/vnd.android.package-archive")

@@ -137,7 +137,7 @@ func New(cfg config.Config, db *gorm.DB, authService *service.AuthService, token
 
 		v1.GET("/app/releases", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), appReleaseHandler.List)
 		v1.GET("/app/releases/latest", middleware.NewFixedWindowLimiter(60, time.Minute, 10000).Middleware(), appReleaseHandler.Latest)
-		v1.GET("/app/releases/:version_code/download", middleware.NewFixedWindowLimiter(20, time.Minute, 10000).Middleware(), appReleaseHandler.Download)
+		v1.GET("/app/releases/:version_code/download", middleware.NewFixedWindowLimiter(120, time.Minute, 10000).Middleware(), appReleaseHandler.Download)
 		refreshTokenRepository := repository.NewRefreshTokenRepository(db)
 		apkManagementAuth := middleware.RequirePermission(tokens, accountGroupRepository, model.PermissionAPKManagement, refreshTokenRepository)
 		groupManagementAuth := middleware.RequirePermission(tokens, accountGroupRepository, model.PermissionAccountGroupManagement, refreshTokenRepository)
