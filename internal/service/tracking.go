@@ -22,7 +22,7 @@ const (
 	PublicLocationPageSize = 100
 	PublicLocationMaxAge   = 90 * time.Second
 	PublicTrackMaxAge      = 20 * time.Minute
-	PublicTrackMaxPoints   = 300
+	PublicTrackMaxPoints   = 1200
 )
 
 type TrackingRepository interface {

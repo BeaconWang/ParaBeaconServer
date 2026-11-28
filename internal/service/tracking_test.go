@@ -212,8 +212,8 @@ func TestListPublicLocationsAttachesFlightTrailForOfflinePilot(t *testing.T) {
 	if !repository.trackPointsCalled || len(repository.trackPointSessionIDs) != 1 || repository.trackPointSessionIDs[0] != sessionID {
 		t.Fatalf("track point query sessions = %v", repository.trackPointSessionIDs)
 	}
-	if repository.trackPointLimit != PublicTrackMaxPoints {
-		t.Fatalf("track point limit = %d, want %d", repository.trackPointLimit, PublicTrackMaxPoints)
+	if repository.trackPointLimit != 1200 {
+		t.Fatalf("track point limit = %d, want 1200", repository.trackPointLimit)
 	}
 	if !repository.includeOffline || len(locations) != 1 || !locations[0].IsFlying || locations[0].IsOnline || len(locations[0].Path) != 1 || locations[0].Path[0].SessionID != sessionID {
 		t.Fatalf("offline pilot flight path = %#v", locations)
