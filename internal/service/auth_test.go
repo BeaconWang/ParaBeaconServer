@@ -31,7 +31,7 @@ func (r *memoryUsers) Create(_ context.Context, user *model.User) error {
 		}
 	}
 	for _, existing := range r.byID {
-		if existing.Username == user.Username {
+		if strings.EqualFold(existing.Username, user.Username) {
 			return gorm.ErrDuplicatedKey
 		}
 	}
@@ -47,11 +47,11 @@ func (r *memoryUsers) Create(_ context.Context, user *model.User) error {
 }
 
 func (r *memoryUsers) FindByLogin(_ context.Context, identifier string) (*model.User, error) {
-	if user, ok := r.byEmail[identifier]; ok {
-		return user, nil
-	}
 	for _, user := range r.byID {
-		if user.Username == identifier {
+		if user.Email != nil && strings.EqualFold(*user.Email, identifier) {
+			return user, nil
+		}
+		if strings.EqualFold(user.Username, identifier) {
 			return user, nil
 		}
 	}
@@ -307,8 +307,8 @@ func TestAuthServiceRegisterLoginAndProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	if user.Username != "sky_rider" || user.Email == nil || *user.Email != "pilot@example.com" {
-		t.Fatalf("registration did not normalize identifiers: %#v", user)
+	if user.Username != "Sky_Rider" || user.Email == nil || *user.Email != "pilot@example.com" {
+		t.Fatalf("registration did not preserve the account name casing or normalize the email: %#v", user)
 	}
 	if user.PilotNumber == nil || *user.PilotNumber < 100000 || *user.PilotNumber > 999999 {
 		t.Fatalf("registration pilot number = %v, want six digits", user.PilotNumber)

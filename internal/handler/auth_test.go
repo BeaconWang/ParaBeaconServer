@@ -38,7 +38,7 @@ func (r *authTestUsers) Create(_ context.Context, user *model.User) error {
 }
 
 func (r *authTestUsers) FindByLogin(_ context.Context, identifier string) (*model.User, error) {
-	if (r.user.Email != nil && identifier == *r.user.Email) || identifier == r.user.Username {
+	if (r.user.Email != nil && strings.EqualFold(identifier, *r.user.Email)) || strings.EqualFold(identifier, r.user.Username) {
 		return r.user, nil
 	}
 	return nil, gorm.ErrRecordNotFound

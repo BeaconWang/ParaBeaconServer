@@ -80,12 +80,13 @@ func NewAuthService(users repository.UserRepository, tokens *utils.TokenManager,
 }
 
 func (s *AuthService) Register(ctx context.Context, username, email, password string) (*model.User, error) {
-	username = strings.ToLower(strings.TrimSpace(username))
+	// The account name keeps the caller's casing; only lookups are case-insensitive.
+	username = strings.TrimSpace(username)
 	email = strings.ToLower(strings.TrimSpace(email))
 	if !usernamePattern.MatchString(username) {
 		return nil, fmt.Errorf("%w: username must be 3-32 letters, digits, or underscores", ErrInvalidInput)
 	}
-	if username == "beacon" {
+	if strings.EqualFold(username, "beacon") {
 		return nil, ErrConflict
 	}
 	if email != "" {
@@ -275,7 +276,8 @@ func (s *AuthService) ChangePassword(ctx context.Context, userID uuid.UUID, curr
 }
 
 func (s *AuthService) Login(ctx context.Context, identifier, password string) (*AuthResult, error) {
-	identifier = strings.ToLower(strings.TrimSpace(identifier))
+	// Login identifiers are matched case-insensitively by the repository.
+	identifier = strings.TrimSpace(identifier)
 	user, err := s.users.FindByLogin(ctx, identifier)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

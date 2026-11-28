@@ -46,7 +46,7 @@ The client connects over HTTP/JSON. Requests pass through the Gin router and rat
 curl.exe -i -X POST http://localhost:8080/api/v1/auth/register -H 'Content-Type: application/json' --data-raw '{"username":"sky_rider","password":"A-long-unique-passphrase-2026"}'
 ```
 
-Only `username` and `password` are required; `email` may be omitted. Usernames are normalized to lowercase and must be 3–32 ASCII letters, digits, or underscores. Supplied emails are normalized to lowercase and unique. Passwords must contain at least 6 characters and no more than 72 UTF-8 bytes; bcrypt hashes are stored and never returned by the API. Duplicate username or email returns `409`.
+Only `username` and `password` are required; `email` may be omitted. Usernames are stored exactly as registered (casing is preserved) and must be 3–32 ASCII letters, digits, or underscores; names that differ only by case are treated as duplicates. Supplied emails are normalized to lowercase and unique. Passwords must contain at least 6 characters and no more than 72 UTF-8 bytes; bcrypt hashes are stored and never returned by the API. Duplicate username or email returns `409`.
 
 ### Login
 
@@ -54,7 +54,7 @@ Only `username` and `password` are required; `email` may be omitted. Usernames a
 curl.exe -i -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' --data-raw '{"identifier":"sky_rider","password":"A-long-unique-passphrase-2026"}'
 ```
 
-`identifier` accepts the registered username or email address. For older clients, `email` remains accepted instead. The response contains an `access_token` (HS256 JWT), a one-time rotating `refresh_token`, their expiry timestamps, and public user fields. Invalid credentials return a generic `401` response. Configure access-token lifetime with `JWT_EXPIRY` (default `15m`); refresh tokens have a rolling 60-day idle lifetime and only their SHA-256 hashes are stored server-side.
+`identifier` accepts the registered username or email address and matches case-insensitively (the stored account name keeps its original casing). For older clients, `email` remains accepted instead. The response contains an `access_token` (HS256 JWT), a one-time rotating `refresh_token`, their expiry timestamps, and public user fields. Invalid credentials return a generic `401` response. Configure access-token lifetime with `JWT_EXPIRY` (default `15m`); refresh tokens have a rolling 60-day idle lifetime and only their SHA-256 hashes are stored server-side.
 
 When the access token is close to expiry, exchange the refresh token at `POST /api/v1/auth/refresh` with `{"refresh_token":"…"}`. A successful refresh within 60 days returns a new access token and a rotated refresh token with a new 60-day expiry; the previous refresh token is immediately invalidated. The session expires if its current refresh token is unused for more than 60 days. Store both tokens securely and never log or expose the refresh token. On sign-out, send the current refresh token to `POST /api/v1/auth/logout` to revoke it.
 

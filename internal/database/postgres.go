@@ -44,6 +44,9 @@ func Open(ctx context.Context, dsn string) (*gorm.DB, error) {
 	if err := migratePilotNumbers(db.WithContext(ctx)); err != nil {
 		return nil, fmt.Errorf("migrate pilot numbers: %w", err)
 	}
+	if err := migrateUsernameCaseInsensitiveUniqueness(db.WithContext(ctx)); err != nil {
+		return nil, fmt.Errorf("migrate username uniqueness: %w", err)
+	}
 	if err := repository.SeedAccountGroups(ctx, db); err != nil {
 		return nil, fmt.Errorf("seed account groups: %w", err)
 	}
@@ -193,5 +196,27 @@ func migratePilotNumbers(db *gorm.DB) error {
 			}
 		}
 		return tx.Exec("ALTER SEQUENCE pilot_number_seq OWNED BY users.pilot_number").Error
+	})
+}
+
+// migrateUsernameCaseInsensitiveUniqueness keeps account names in their original
+// casing while preventing names that differ only by case from coexisting.
+func migrateUsernameCaseInsensitiveUniqueness(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(748392021)").Error; err != nil {
+			return err
+		}
+		var collisions int64
+		if err := tx.Raw(`
+			SELECT COUNT(*) FROM (
+				SELECT 1 FROM users GROUP BY LOWER(username) HAVING COUNT(*) > 1
+			) AS duplicated
+		`).Scan(&collisions).Error; err != nil {
+			return err
+		}
+		if collisions > 0 {
+			return fmt.Errorf("%d username(s) differ only by case; rename them before enabling case-insensitive uniqueness", collisions)
+		}
+		return tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users (LOWER(username))").Error
 	})
 }
