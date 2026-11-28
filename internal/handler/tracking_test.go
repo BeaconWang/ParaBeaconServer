@@ -210,6 +210,28 @@ func TestListPublicLocationsAllowsAnonymousRequests(t *testing.T) {
 	if service.userID != uuid.Nil {
 		t.Fatalf("anonymous requester id = %s, want nil UUID", service.userID)
 	}
+	if !service.includeOffline {
+		t.Fatal("offline locations should be shared by default")
+	}
+}
+
+func TestListPublicLocationsHidesOfflineOnlyWhenExplicitlyDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &trackingHandlerTestService{}
+	engine := gin.New()
+	engine.GET("/map/active-locations", func(c *gin.Context) {
+		c.Set(middleware.AuthenticatedUserIDKey, uuid.New())
+		NewTrackingHandler(service).ListPublicLocations(c)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/map/active-locations?west=8&south=47&east=9&north=48&show_offline=false", nil)
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	if service.includeOffline {
+		t.Fatal("explicit show_offline=false was not honored")
+	}
 }
 
 func TestListPublicLocationsRejectsInvalidBoundsAndCursor(t *testing.T) {

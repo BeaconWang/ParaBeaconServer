@@ -130,7 +130,10 @@ func (h *TrackingHandler) ListPublicLocations(c *gin.Context) {
 		}
 		after = parsed
 	}
-	includeOffline := false
+	// Offline pilots keep sharing their last known location and flight trail
+	// until the owner deletes the data, so offline locations are included by
+	// default; clients opt out explicitly with show_offline=false.
+	includeOffline := true
 	if raw := c.Query("show_offline"); raw != "" {
 		parsed, err := strconv.ParseBool(raw)
 		if err != nil {

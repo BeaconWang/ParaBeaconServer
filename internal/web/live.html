@@ -118,9 +118,9 @@
     let trails = new Map();
     let selectedKey = "";
     let refreshSequence = 0;
-    const OFFLINE_SETTING_KEY = "parabeacon-map-show-offline";
-    let showOffline = false;
-    try { showOffline = window.localStorage.getItem(OFFLINE_SETTING_KEY) === "true"; } catch (_) {}
+    const OFFLINE_SETTING_KEY = "parabeacon-map-show-offline-v2";
+    let showOffline = true;
+    try { const storedOffline = window.localStorage.getItem(OFFLINE_SETTING_KEY); if (storedOffline !== null) showOffline = storedOffline === "true"; } catch (_) {}
 
     const escapeHTML = (value) => String(value ?? "").replace(/[&<>\"']/g, (character) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[character]));
     const formatNumber = (value, digits = 4) => Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : "—";
@@ -170,7 +170,7 @@
       const result = [];
       for (let page = 0; page < 100; page += 1) {
         const params = new URLSearchParams({ west: WORLD_BOUNDS.west, south: WORLD_BOUNDS.south, east: WORLD_BOUNDS.east, north: WORLD_BOUNDS.north });
-        if (showOffline) params.set("show_offline", "true");
+        params.set("show_offline", showOffline ? "true" : "false");
         if (cursor) params.set("cursor", cursor);
         const body = await api(`/api/v1/map/active-locations?${params}`);
         result.push(...(Array.isArray(body.locations) ? body.locations : []));
